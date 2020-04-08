@@ -15,6 +15,20 @@
 #include <vector>
 
 
+template<typename T>
+Matrix<T, 3, 3> rotate2_z(T rad) {
+	return {std::cos(rad), -std::sin(rad), 0,
+			std::sin(rad), std::cos(rad), 0,
+			0, 0, 1};
+}
+
+template<typename T>
+Matrix<T, 3, 3> translate2(T x, T y) {
+	return {1, 0, x,
+			0, 1, y,
+			0, 0, 1};
+}
+
 struct scan_point_t
 {
 	float x = 0;		// [m]
@@ -36,21 +50,52 @@ public:
 	template<typename T>
 	void solve(	const GridMap<T>& map,
 				const std::vector<scan_point_t>& points,
-				const T target)
+				const float target)
 	{
 		Matrix<double, 3, 1> G;			// gradient vector
 		Matrix<double, 3, 3> H;			// hessian matrix
 
+		const Matrix<double, 3, 3> T = translate2(pos_x, pos_y) * rotate2_z(pos_yaw);
+
 		for(const auto& point : points)
 		{
-			// TODO
+			const auto q = (T * Matrix<double, 3, 1>{point.x, point.y, 1}).project();
+			const float grid_x = q[0] * map.inv_scale();
+			const float grid_y = q[1] * map.inv_scale();
+
+			const double r_i = map.bilinear_lookup(grid_x, grid_y) - target;
+
+			float dx, dy;
+			map.calc_gradient(grid_x, grid_y, dx, dy);
+
+			const double J_x = dx * 1.f;
+			const double J_y = dy * 1.f;
+			const double J_yaw =  dx * (-sin(pos_yaw) * point.x - cos(pos_yaw) * point.y)
+								+ dy * ( cos(pos_yaw) * point.x - sin(pos_yaw) * point.y);
+
+			G[0] += J_x * r_i;
+			G[1] += J_y * r_i;
+			G[2] += J_yaw * r_i;
+
+			H(0, 0) += J_x * J_x;
+			H(1, 1) += J_y * J_y;
+			H(2, 2) += J_yaw * J_yaw;
+
+			H(0, 1) += J_x * J_y;
+			H(1, 0) += J_x * J_y;
+
+			H(0, 2) += J_x * J_yaw;
+			H(2, 0) += J_x * J_yaw;
+
+			H(1, 2) += J_y * J_yaw;
+			H(2, 1) += J_y * J_yaw;
 		}
 
 		H(0, 0) += damping;
 		H(1, 1) += damping;
 		H(2, 2) += damping;
 
-		auto X = H.inverse() * G;
+		const auto X = H.inverse() * G;
 		pos_x -= gain * X[0];
 		pos_y -= gain * X[1];
 		pos_yaw -= gain * X[2];

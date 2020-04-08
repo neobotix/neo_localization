@@ -54,6 +54,10 @@ public:
 		return m_scale;
 	}
 
+	float inv_scale() const {
+		return 1 / m_scale;
+	}
+
 	int64_t num_cells() const {
 		return int64_t(m_size) * m_size;
 	}
@@ -141,7 +145,7 @@ public:
 		}
 	}
 
-	void smooth_33()
+	void smooth_33_1()
 	{
 		static const float coeff_33_1[3][3] = {
 				{0.077847, 0.123317, 0.077847},
@@ -149,7 +153,7 @@ public:
 				{0.077847, 0.123317, 0.077847}
 		};
 
-		GridMap tmp(m_size);
+		GridMap<T> tmp(m_size);
 
 		for(int y = 0; y < m_size; ++y) {
 			for(int x = 0; x < m_size; ++x) {
@@ -159,6 +163,34 @@ public:
 					for(int i = -1; i <= 1; ++i) {
 						const int x_ = std::min(std::max(x + i, 0), m_size - 1);
 						sum += coeff_33_1[j+1][i+1] * (*this)(x_, y_);
+					}
+				}
+				tmp(x, y) = sum;
+			}
+		}
+		*this = tmp;
+	}
+
+	void smooth_55_2()
+	{
+		static const float coeff_55_2[5][5] = {
+				{0.0232468, 0.033824, 0.0383276, 0.033824, 0.0232468},
+				{0.033824, 0.0492136, 0.0557663, 0.0492136, 0.033824},
+				{0.0383276, 0.0557663, 0.0631915, 0.0557663, 0.0383276},
+				{0.033824, 0.0492136, 0.0557663, 0.0492136, 0.033824},
+				{0.0232468, 0.033824, 0.0383276, 0.033824, 0.0232468}
+		};
+
+		GridMap<T> tmp(m_size);
+
+		for(int y = 0; y < m_size; ++y) {
+			for(int x = 0; x < m_size; ++x) {
+				float sum = 0;
+				for(int j = -2; j <= 2; ++j) {
+					const int y_ = std::min(std::max(y + j, 0), m_size - 1);
+					for(int i = -2; i <= 2; ++i) {
+						const int x_ = std::min(std::max(x + i, 0), m_size - 1);
+						sum += coeff_55_2[j+2][i+2] * (*this)(x_, y_);
 					}
 				}
 				tmp(x, y) = sum;
