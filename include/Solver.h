@@ -39,9 +39,9 @@ struct scan_point_t
 
 class Solver {
 public:
-	double pos_x = 0;
-	double pos_y = 0;
-	double pos_yaw = 0;
+	double pose_x = 0;
+	double pose_y = 0;
+	double pose_yaw = 0;
 
 	double gain = 1;					// how fast to converge (0 to 1)
 	double damping = 0;					// numerical hessian damping
@@ -55,11 +55,11 @@ public:
 		Matrix<double, 3, 1> G;			// gradient vector
 		Matrix<double, 3, 3> H;			// hessian matrix
 
-		const Matrix<double, 3, 3> T = translate2(pos_x, pos_y) * rotate2_z(pos_yaw);
+		const Matrix<double, 3, 3> P = translate2(pose_x, pose_y) * rotate2_z(pose_yaw);
 
 		for(const auto& point : points)
 		{
-			const auto q = (T * Matrix<double, 3, 1>{point.x, point.y, 1}).project();
+			const auto q = (P * Matrix<double, 3, 1>{point.x, point.y, 1}).project();
 			const float grid_x = q[0] * map.inv_scale();
 			const float grid_y = q[1] * map.inv_scale();
 
@@ -70,8 +70,8 @@ public:
 
 			const double J_x = dx * 1.f;
 			const double J_y = dy * 1.f;
-			const double J_yaw =  dx * (-sin(pos_yaw) * point.x - cos(pos_yaw) * point.y)
-								+ dy * ( cos(pos_yaw) * point.x - sin(pos_yaw) * point.y);
+			const double J_yaw =  dx * (-sin(pose_yaw) * point.x - cos(pose_yaw) * point.y)
+								+ dy * ( cos(pose_yaw) * point.x - sin(pose_yaw) * point.y);
 
 			G[0] += J_x * r_i;
 			G[1] += J_y * r_i;
@@ -96,9 +96,9 @@ public:
 		H(2, 2) += damping;
 
 		const auto X = H.inverse() * G;
-		pos_x -= gain * X[0];
-		pos_y -= gain * X[1];
-		pos_yaw -= gain * X[2];
+		pose_x -= gain * X[0];
+		pose_y -= gain * X[1];
+		pose_yaw -= gain * X[2];
 	}
 
 };

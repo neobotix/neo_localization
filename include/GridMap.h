@@ -21,7 +21,7 @@ public:
 		:	m_size(size_),
 			m_scale(scale_)
 	{
-		T = new T[int64_t(size_) * size_];
+		m_map = new T[int64_t(size_) * size_];
 	}
 
 	GridMap(const GridMap& other)
@@ -153,7 +153,7 @@ public:
 				{0.077847, 0.123317, 0.077847}
 		};
 
-		GridMap<T> tmp(m_size);
+		GridMap<T> tmp(m_size, m_scale);
 
 		for(int y = 0; y < m_size; ++y) {
 			for(int x = 0; x < m_size; ++x) {
@@ -181,7 +181,7 @@ public:
 				{0.0232468, 0.033824, 0.0383276, 0.033824, 0.0232468}
 		};
 
-		GridMap<T> tmp(m_size);
+		GridMap<T> tmp(m_size, m_scale);
 
 		for(int y = 0; y < m_size; ++y) {
 			for(int x = 0; x < m_size; ++x) {
