@@ -189,7 +189,7 @@ protected:
 
 		tf::StampedTransform base_to_odom;
 		try {
-			m_tf.lookupTransform(m_base_frame, m_odom_frame, ros::Time(), base_to_odom);
+			m_tf.lookupTransform(m_odom_frame, m_base_frame, ros::Time(), base_to_odom);
 		} catch(...) {
 			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(m_base_frame, m_odom_frame) failed!");
 			return;
