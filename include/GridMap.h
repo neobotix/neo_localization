@@ -117,6 +117,9 @@ public:
 				dy += coeff_33_dxy[i+1][j+1] * value;
 			}
 		}
+
+		dx /= 2 * m_scale;
+		dy /= 2 * m_scale;
 	}
 
 	void calc_gradient2(float x, float y, float& ddx, float& ddy) const
@@ -143,6 +146,9 @@ public:
 				ddy += coeff_33_ddxy[i+1][j+1] * value;
 			}
 		}
+
+		ddx /= 2 * m_scale;
+		ddy /= 2 * m_scale;
 	}
 
 	void smooth_33_1()

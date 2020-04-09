@@ -109,7 +109,7 @@ protected:
 
 		tf::StampedTransform sensor_to_base;
 		try {
-			m_tf.lookupTransform(scan->header.frame_id, m_base_frame, scan->header.stamp, sensor_to_base);
+			m_tf.lookupTransform(m_base_frame, scan->header.frame_id, scan->header.stamp, sensor_to_base);
 		} catch(...) {
 			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(scan->header.frame_id, m_base_frame) failed!");
 			return;
@@ -117,7 +117,7 @@ protected:
 
 		tf::StampedTransform base_to_odom;
 		try {
-			m_tf.lookupTransform(m_base_frame, m_odom_frame, scan->header.stamp, base_to_odom);
+			m_tf.lookupTransform(m_odom_frame, m_base_frame, scan->header.stamp, base_to_odom);
 		} catch(...) {
 			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(m_base_frame, m_odom_frame) failed!");
 			return;
@@ -133,16 +133,21 @@ protected:
 		m_solver.pose_y = grid_pose[1];
 		m_solver.pose_yaw = grid_pose[2];
 
-		std::vector<scan_point_t> points(scan->ranges.size());
+		std::vector<scan_point_t> points;
 
-		for(size_t i = 0; i < points.size(); ++i)
+		for(size_t i = 0; i < scan->ranges.size(); ++i)
 		{
+			if(scan->ranges[i] <= 0) {
+				continue;
+			}
+
 			const Matrix<double, 3, 1> scan_pos = (S * rotate3_z<double>(scan->angle_min + i * scan->angle_increment)
 													* Matrix<double, 4, 1>{scan->ranges[i], 0, 0, 1}).project();
-			scan_point_t& point = points[i];
+			scan_point_t point;
 			point.x = scan_pos[0];
 			point.y = scan_pos[1];
 			point.w = 1;
+			points.emplace_back(point);
 		}
 
 		for(int iter = 0; iter < m_num_iterations; ++iter)
@@ -310,6 +315,7 @@ int main(int argc, char** argv)
 	}
 	catch(const std::exception& ex) {
 		ROS_ERROR_STREAM("NeoOmniDriveNode: " << ex.what());
+		return -1;
 	}
 
 	return 0;

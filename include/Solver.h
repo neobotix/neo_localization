@@ -43,8 +43,8 @@ public:
 	double pose_y = 0;
 	double pose_yaw = 0;
 
-	double gain = 1;					// how fast to converge (0 to 1)
-	double damping = 0;					// numerical hessian damping
+	double gain = 0.1;					// how fast to converge (0 to 1)
+	double damping = 1;					// numerical hessian damping
 	double r_norm = 0;					// current error norm
 
 	template<typename T>
@@ -57,6 +57,8 @@ public:
 
 		const Matrix<double, 3, 3> P = translate2(pose_x, pose_y) * rotate2_z(pose_yaw);
 
+		r_norm = 0;
+
 		for(const auto& point : points)
 		{
 			const auto q = (P * Matrix<double, 3, 1>{point.x, point.y, 1}).project();
@@ -64,6 +66,7 @@ public:
 			const float grid_y = q[1] * map.inv_scale();
 
 			const double r_i = map.bilinear_lookup(grid_x, grid_y) - target;
+			r_norm += r_i * r_i;
 
 			float dx, dy;
 			map.calc_gradient(grid_x, grid_y, dx, dy);
@@ -90,6 +93,8 @@ public:
 			H(1, 2) += J_y * J_yaw;
 			H(2, 1) += J_y * J_yaw;
 		}
+
+		r_norm /= points.size();
 
 		H(0, 0) += damping;
 		H(1, 1) += damping;
