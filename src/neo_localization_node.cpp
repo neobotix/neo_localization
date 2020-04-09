@@ -93,7 +93,7 @@ public:
 		m_node_handle.param("num_smooth", m_num_smooth, 20);
 		m_node_handle.param("solver_iterations", m_solver_iterations, 10);
 		m_node_handle.param("solver_gain", m_solver.gain, 0.1);
-		m_node_handle.param("solver_damping", m_solver.damping, 1.);
+		m_node_handle.param("solver_damping", m_solver.damping, 100.);
 
 		m_sub_scan_topic = m_node_handle.subscribe("/scan", 10, &NeoLocalizationNode::scan_callback, this);
 		m_sub_map_topic = m_node_handle.subscribe("/map", 1, &NeoLocalizationNode::map_callback, this);
