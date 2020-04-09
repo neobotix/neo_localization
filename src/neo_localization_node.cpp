@@ -90,8 +90,10 @@ public:
 		m_node_handle.param<std::string>("map_frame", m_map_frame, "map");
 		m_node_handle.param("update_gain", m_update_gain, 0.1);
 		m_node_handle.param("map_sub_sample", m_map_sub_sample, 1);
-		m_node_handle.param("num_smooth", m_num_smooth, 30);
-		m_node_handle.param("num_iterations", m_num_iterations, 10);
+		m_node_handle.param("num_smooth", m_num_smooth, 20);
+		m_node_handle.param("solver_iterations", m_solver_iterations, 10);
+		m_node_handle.param("solver_gain", m_solver.gain, 0.1);
+		m_node_handle.param("solver_damping", m_solver.damping, 1.);
 
 		m_sub_scan_topic = m_node_handle.subscribe("/scan", 10, &NeoLocalizationNode::scan_callback, this);
 		m_sub_map_topic = m_node_handle.subscribe("/map", 1, &NeoLocalizationNode::map_callback, this);
@@ -150,7 +152,7 @@ protected:
 			points.emplace_back(point);
 		}
 
-		for(int iter = 0; iter < m_num_iterations; ++iter)
+		for(int iter = 0; iter < m_solver_iterations; ++iter)
 		{
 			ROS_INFO_STREAM("Iter " << iter << ": pose_x=" << m_solver.pose_x << ", pose_y=" << m_solver.pose_y << ", pose_yaw=" << m_solver.pose_yaw
 					<< ", r_norm=" << m_solver.r_norm);
@@ -231,6 +233,7 @@ protected:
 		}
 
 		for(int i = 0; i < m_num_smooth; ++i) {
+			ROS_INFO_STREAM("Smooth iter " << i);
 			map->smooth_33_1();
 		}
 
@@ -288,7 +291,7 @@ private:
 	double m_update_gain = 0;
 	int m_map_sub_sample = 0;
 	int m_num_smooth = 0;
-	int m_num_iterations = 0;
+	int m_solver_iterations = 0;
 
 	double m_offset_x = 0;			// current x offset between odom and map
 	double m_offset_y = 0;			// current y offset between odom and map

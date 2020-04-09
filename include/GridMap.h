@@ -42,7 +42,7 @@ public:
 			throw std::logic_error("grid size mismatch");
 		}
 		m_scale = other.m_scale;
-		::memcpy(m_map, other.m_map, m_size * m_size);
+		::memcpy(m_map, other.m_map, m_size * m_size * sizeof(T));
 		return *this;
 	}
 
