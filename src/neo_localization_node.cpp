@@ -160,8 +160,10 @@ protected:
 			m_solver.solve<float>(*m_map, points, 1);
 		}
 
+		const Matrix<double, 4, 4> grid_pose_new = translate25(m_solver.pose_x, m_solver.pose_y) * rotate25_z(m_solver.pose_yaw);
+
 		const Matrix<double, 3, 1> new_offset =
-				(L.inverse() * m_grid_to_map * Matrix<double, 4, 1>{m_solver.pose_x, m_solver.pose_y, m_solver.pose_yaw, 1}).project();
+				(m_grid_to_map * grid_pose_new * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
 		const double delta_yaw = angles::shortest_angular_distance(m_offset_yaw, new_offset[2]);
 
