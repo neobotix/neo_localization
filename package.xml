@@ -1,0 +1,33 @@
+<package>
+    <name>neo_localization</name>
+    <version>1.0.0</version>
+    <description>
+		Platform localization node based on laser sensors and a grid map.
+    </description>
+    <author>Max Wittal</author>
+    <author>wittal@neobotix.de</author>
+    <maintainer email="ros@neobotix.de">Neobotix GmbH</maintainer>
+    <maintainer email="wittal@neobotix.de">Max Wittal</maintainer>
+    <license>BSD</license>
+    <url>https://github.com/neobotix/neo_localization</url>
+
+    <buildtool_depend>catkin</buildtool_depend>
+
+    <build_depend>cmake_modules</build_depend>
+    <build_depend>roscpp</build_depend>
+    <build_depend>tf</build_depend>
+    <build_depend>nav_msgs</build_depend>
+    <build_depend>sensor_msgs</build_depend>
+    <build_depend>geometry_msgs</build_depend>
+    <build_depend>neo_common</build_depend>
+
+    <run_depend>roscpp</run_depend>
+    <run_depend>tf</run_depend>
+    <run_depend>nav_msgs</run_depend>
+    <run_depend>sensor_msgs</run_depend>
+    <run_depend>geometry_msgs</run_depend>
+    <run_depend>neo_common</run_depend>
+
+</package>
+
+

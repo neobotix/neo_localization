@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<launch>
+	
+    <!-- upload parameters -->
+    <rosparam command="load" ns="localization" file="$(find neo_localization)/launch/test_setup.yaml"/>
+	
+    <!-- start nodes -->
+    <node pkg="neo_localization" type="neo_localization_node" ns="localization" name="neo_localization_node" respawn="false" output="screen" launch-prefix="gdb --args">
+    	<remap from="/scan" to="/lidar_1/scan_filtered"/>
+    </node>
+
+</launch>
