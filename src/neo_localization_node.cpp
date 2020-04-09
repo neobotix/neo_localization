@@ -198,7 +198,7 @@ protected:
 		const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 
 		const Matrix<double, 3, 1> new_offset =
-				(L.inverse() * convert_transform_25(map_pose) * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
+				(convert_transform_25(map_pose) * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
 		m_offset_x = new_offset[0];
 		m_offset_y = new_offset[1];
