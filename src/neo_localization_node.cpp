@@ -127,10 +127,11 @@ protected:
 
 		const Matrix<double, 4, 4> S = convert_transform_3(sensor_to_base);
 		const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
-		const Matrix<double, 4, 4> T = translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw);
+		const Matrix<double, 4, 4> T = translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw);		// odom to map
 
 		const Matrix<double, 3, 1> grid_pose = (m_grid_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
+		// set initial guess to odometry prediction
 		m_solver.pose_x = grid_pose[0];
 		m_solver.pose_y = grid_pose[1];
 		m_solver.pose_yaw = grid_pose[2];
@@ -140,9 +141,10 @@ protected:
 		for(size_t i = 0; i < scan->ranges.size(); ++i)
 		{
 			if(scan->ranges[i] <= 0) {
-				continue;
+				continue;	// no measurement
 			}
 
+			// transform sensor points into base coordinate system
 			const Matrix<double, 3, 1> scan_pos = (S * rotate3_z<double>(scan->angle_min + i * scan->angle_increment)
 													* Matrix<double, 4, 1>{scan->ranges[i], 0, 0, 1}).project();
 			scan_point_t point;
@@ -169,18 +171,21 @@ protected:
 
 			m_solver.solve<float>(*m_map_fine, points, 1);
 		}
+
+		// get new pose from solver
 		const Matrix<double, 4, 4> grid_pose_new = translate25(m_solver.pose_x, m_solver.pose_y) * rotate25_z(m_solver.pose_yaw);
 
+		// compute new odom to map offset from new pose
 		const Matrix<double, 3, 1> new_offset =
 				(m_grid_to_map * grid_pose_new * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
-		const double delta_yaw = angles::shortest_angular_distance(m_offset_yaw, new_offset[2]);
-
+		// apply new offset with an exponential low pass filter
 		m_offset_x = new_offset[0] * m_update_gain + m_offset_x * (1 - m_update_gain);
 		m_offset_y = new_offset[1] * m_update_gain + m_offset_y * (1 - m_update_gain);
-		m_offset_yaw += delta_yaw * m_update_gain;
+		m_offset_yaw += angles::shortest_angular_distance(m_offset_yaw, new_offset[2]) * m_update_gain;
 		m_offset_time = scan->header.stamp;
 
+		// publish new transform
 		broadcast();
 	}
 
@@ -206,6 +211,7 @@ protected:
 
 		const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 
+		// compute new odom to map offset
 		const Matrix<double, 3, 1> new_offset =
 				(convert_transform_25(map_pose) * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
@@ -232,6 +238,7 @@ protected:
 
 		auto map = std::make_shared<GridMap<float>>(ros_map->info.width, ros_map->info.resolution);
 
+		// convert map to our format (occupancy between 0 and 1)
 		for(int y = 0; y < map->size(); ++y) {
 			for(int x = 0; x < map->size(); ++x) {
 				const auto cell = ros_map->data[y * map->size() + x];
