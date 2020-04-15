@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdexcept>
+#include <memory>
 
 
 template<typename T>
@@ -203,6 +204,33 @@ public:
 			}
 		}
 		*this = tmp;
+	}
+
+	std::shared_ptr<GridMap<T>> downscale()
+	{
+		static const float coeff_44_1[4][4] {
+			{0.0180824, 0.049153, 0.049153, 0.0180824},
+			{0.049153, 0.133612, 0.133612, 0.049153},
+			{0.049153, 0.133612, 0.133612, 0.049153},
+			{0.0180824, 0.049153, 0.049153, 0.0180824}
+		};
+
+		auto res = std::make_shared<GridMap<T>>(m_size / 2, m_scale * 2);
+
+		for(int y = 0; y < m_size / 2; ++y) {
+			for(int x = 0; x < m_size / 2; ++x) {
+				float sum = 0;
+				for(int j = -1; j <= 2; ++j) {
+					const int y_ = std::min(std::max(y * 2 + j, 0), m_size - 1);
+					for(int i = -1; i <= 2; ++i) {
+						const int x_ = std::min(std::max(x * 2 + i, 0), m_size - 1);
+						sum += coeff_44_1[j+1][i+1] * (*this)(x_, y_);
+					}
+				}
+				(*res)(x, y) = sum;
+			}
+		}
+		return res;
 	}
 
 private:

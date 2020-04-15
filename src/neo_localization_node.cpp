@@ -105,7 +105,7 @@ protected:
 	{
 		std::lock_guard<std::mutex> lock(m_node_mutex);
 
-		if(!m_map) {
+		if(!m_map_fine || !m_map_coarse) {
 			return;
 		}
 
@@ -152,14 +152,23 @@ protected:
 			points.emplace_back(point);
 		}
 
+		// coarse localization
 		for(int iter = 0; iter < m_solver_iterations; ++iter)
 		{
-			ROS_INFO_STREAM("Iter " << iter << ": pose_x=" << m_solver.pose_x << ", pose_y=" << m_solver.pose_y << ", pose_yaw=" << m_solver.pose_yaw
+			ROS_INFO_STREAM("Coarse iter " << iter << ": pose_x=" << m_solver.pose_x << ", pose_y=" << m_solver.pose_y << ", pose_yaw=" << m_solver.pose_yaw
 					<< ", r_norm=" << m_solver.r_norm);
 
-			m_solver.solve<float>(*m_map, points, 1);
+			m_solver.solve<float>(*m_map_coarse, points, 1);
 		}
 
+		// fine localization
+		for(int iter = 0; iter < m_solver_iterations; ++iter)
+		{
+			ROS_INFO_STREAM("Fine iter " << iter << ": pose_x=" << m_solver.pose_x << ", pose_y=" << m_solver.pose_y << ", pose_yaw=" << m_solver.pose_yaw
+					<< ", r_norm=" << m_solver.r_norm);
+
+			m_solver.solve<float>(*m_map_fine, points, 1);
+		}
 		const Matrix<double, 4, 4> grid_pose_new = translate25(m_solver.pose_x, m_solver.pose_y) * rotate25_z(m_solver.pose_yaw);
 
 		const Matrix<double, 3, 1> new_offset =
@@ -234,9 +243,13 @@ protected:
 			}
 		}
 
+		auto fine = map;
+		auto coarse = map->downscale()->downscale();		// coarse is 4x lower resolution
+
 		for(int i = 0; i < m_num_smooth; ++i) {
 			ROS_INFO_STREAM("Smooth iter " << i);
-			map->smooth_33_1();
+			fine->smooth_33_1();
+			coarse->smooth_33_1();
 		}
 
 		{
@@ -246,7 +259,8 @@ protected:
 				tf::poseMsgToTF(ros_map->info.origin, tmp);
 				m_grid_to_map = convert_transform_25(tmp);
 			}
-			m_map = map;
+			m_map_fine = fine;
+			m_map_coarse = coarse;
 		}
 	}
 
@@ -303,7 +317,8 @@ private:
 	Matrix<double, 4, 4> m_grid_to_map;
 
 	Solver m_solver;
-	std::shared_ptr<GridMap<float>> m_map;
+	std::shared_ptr<GridMap<float>> m_map_fine;
+	std::shared_ptr<GridMap<float>> m_map_coarse;
 
 };
 
