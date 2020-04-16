@@ -55,6 +55,7 @@ public:
 		Matrix<double, 3, 1> G;			// gradient vector
 		Matrix<double, 3, 3> H;			// hessian matrix
 
+		const float inv_scale = map.inv_scale();
 		const Matrix<double, 3, 3> P = translate2(pose_x, pose_y) * rotate2_z(pose_yaw);
 
 		r_norm = 0;
@@ -62,8 +63,8 @@ public:
 		for(const auto& point : points)
 		{
 			const auto q = (P * Matrix<double, 3, 1>{point.x, point.y, 1}).project();
-			const float grid_x = q[0] * map.inv_scale();
-			const float grid_y = q[1] * map.inv_scale();
+			const float grid_x = q[0] * inv_scale - 0.5f;
+			const float grid_y = q[1] * inv_scale - 0.5f;
 
 			const double r_i = map.bilinear_lookup(grid_x, grid_y) - target;
 			r_norm += r_i * r_i;
