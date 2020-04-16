@@ -1,5 +1,7 @@
 
 update_gain: 0.5
+confidence_gain: 0.01
+max_confidence: 0.95
 map_downscale: 0
 num_smooth: 5
 solver_gain: 0.1

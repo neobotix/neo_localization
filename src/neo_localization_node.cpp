@@ -89,13 +89,15 @@ public:
 		m_node_handle.param<std::string>("base_frame", m_base_frame, "base_link");
 		m_node_handle.param<std::string>("odom_frame", m_odom_frame, "odom");
 		m_node_handle.param<std::string>("map_frame", m_map_frame, "map");
-		m_node_handle.param("update_gain", m_update_gain, 0.5);
 		m_node_handle.param("map_downscale", m_map_downscale, 0);
 		m_node_handle.param("num_smooth", m_num_smooth, 5);
 		m_node_handle.param("solver_iterations", m_solver_iterations, 20);
 		m_node_handle.param("solver_gain", m_solver.gain, 0.1);
 		m_node_handle.param("solver_damping", m_solver.damping, 1000.);
 		m_node_handle.param("sample_rate", m_sample_rate, 10);
+		m_node_handle.param("update_gain", m_update_gain, 0.5);
+		m_node_handle.param("confidence_gain", m_confidence_gain, 0.01);
+		m_node_handle.param("max_confidence", m_max_confidence, 0.95);
 		m_node_handle.param("sample_std_x", m_sample_std_x, 0.5);
 		m_node_handle.param("sample_std_y", m_sample_std_y, 0.5);
 		m_node_handle.param("sample_std_yaw", m_sample_std_yaw, 0.5);
@@ -167,9 +169,10 @@ protected:
 		}
 
 		// setup distributions
-		std::normal_distribution<double> dist_x(m_solver.pose_x, m_sample_std_x);
-		std::normal_distribution<double> dist_y(m_solver.pose_y, m_sample_std_y);
-		std::normal_distribution<double> dist_yaw(m_solver.pose_yaw, m_sample_std_yaw);
+		const double rel_std_dev = fmax(1 - m_confidence, 0);
+		std::normal_distribution<double> dist_x(m_solver.pose_x, m_sample_std_x * rel_std_dev);
+		std::normal_distribution<double> dist_y(m_solver.pose_y, m_sample_std_y * rel_std_dev);
+		std::normal_distribution<double> dist_yaw(m_solver.pose_yaw, m_sample_std_yaw * rel_std_dev);
 
 		// solve odometry prediction first
 		for(int iter = 0; iter < m_solver_iterations; ++iter) {
@@ -220,8 +223,13 @@ protected:
 		m_offset_yaw += angles::shortest_angular_distance(m_offset_yaw, new_offset[2]) * m_update_gain;
 		m_offset_time = scan->header.stamp;
 
+		// apply confidence gain
+		m_confidence += (m_max_confidence - m_confidence) * 0.01;
+
 		// publish new transform
 		broadcast();
+
+		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << best_score << ", confidence=" << m_confidence);
 	}
 
 	void pose_callback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose)
@@ -254,6 +262,9 @@ protected:
 		m_offset_y = new_offset[1];
 		m_offset_yaw = new_offset[2];
 		m_offset_time = pose->header.stamp;
+
+		// reset confidence to zero
+		m_confidence = 0;
 
 		broadcast();
 
@@ -305,6 +316,7 @@ protected:
 				m_grid_to_map = convert_transform_25(tmp);
 			}
 			m_map = map;
+			m_confidence = 0;
 		}
 	}
 
@@ -348,11 +360,13 @@ private:
 	std::string m_odom_frame;
 	std::string m_map_frame;
 
-	double m_update_gain = 0;
 	int m_map_downscale = 0;
 	int m_num_smooth = 0;
 	int m_solver_iterations = 0;
 	int m_sample_rate = 0;
+	double m_update_gain = 0;
+	double m_confidence_gain = 0;
+	double m_max_confidence = 0;
 	double m_sample_std_x = 0;
 	double m_sample_std_y = 0;
 	double m_sample_std_yaw = 0;
@@ -360,6 +374,7 @@ private:
 	double m_offset_x = 0;			// current x offset between odom and map
 	double m_offset_y = 0;			// current y offset between odom and map
 	double m_offset_yaw = 0;		// current yaw offset between odom and map
+	double m_confidence = 0;		// current localization confidence
 	ros::Time m_offset_time;
 
 	Matrix<double, 4, 4> m_grid_to_map;
