@@ -1,8 +1,8 @@
 
-update_gain: 0.1
-num_smooth: 20
-solver_iterations: 10
+update_gain: 0.5
+num_smooth: 5
+solver_iterations: 20
 solver_gain: 0.1
-solver_damping: 100
+solver_damping: 1000
 broadcast_tf: true
 
