@@ -157,19 +157,19 @@ protected:
 		// coarse localization
 		for(int iter = 0; iter < m_solver_iterations; ++iter)
 		{
+			m_solver.solve<float>(*m_map_coarse, points, 1);
+
 			ROS_INFO_STREAM("Coarse iter " << iter << ": pose_x=" << m_solver.pose_x << ", pose_y=" << m_solver.pose_y << ", pose_yaw=" << m_solver.pose_yaw
 					<< ", r_norm=" << m_solver.r_norm);
-
-			m_solver.solve<float>(*m_map_coarse, points, 1);
 		}
 
 		// fine localization
 		for(int iter = 0; iter < m_solver_iterations; ++iter)
 		{
+			m_solver.solve<float>(*m_map_fine, points, 1);
+
 			ROS_INFO_STREAM("Fine iter " << iter << ": pose_x=" << m_solver.pose_x << ", pose_y=" << m_solver.pose_y << ", pose_yaw=" << m_solver.pose_yaw
 					<< ", r_norm=" << m_solver.r_norm);
-
-			m_solver.solve<float>(*m_map_fine, points, 1);
 		}
 
 		// get new pose from solver
