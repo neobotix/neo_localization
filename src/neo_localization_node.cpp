@@ -21,6 +21,7 @@
 #include <tf/transform_datatypes.h>
 
 #include <mutex>
+#include <random>
 
 
 template<typename T>
@@ -88,12 +89,16 @@ public:
 		m_node_handle.param<std::string>("base_frame", m_base_frame, "base_link");
 		m_node_handle.param<std::string>("odom_frame", m_odom_frame, "odom");
 		m_node_handle.param<std::string>("map_frame", m_map_frame, "map");
-		m_node_handle.param("update_gain", m_update_gain, 0.1);
-		m_node_handle.param("map_sub_sample", m_map_sub_sample, 1);
-		m_node_handle.param("num_smooth", m_num_smooth, 20);
-		m_node_handle.param("solver_iterations", m_solver_iterations, 10);
+		m_node_handle.param("update_gain", m_update_gain, 0.5);
+		m_node_handle.param("map_downscale", m_map_downscale, 0);
+		m_node_handle.param("num_smooth", m_num_smooth, 5);
+		m_node_handle.param("solver_iterations", m_solver_iterations, 20);
 		m_node_handle.param("solver_gain", m_solver.gain, 0.1);
-		m_node_handle.param("solver_damping", m_solver.damping, 100.);
+		m_node_handle.param("solver_damping", m_solver.damping, 1000.);
+		m_node_handle.param("sample_rate", m_sample_rate, 10);
+		m_node_handle.param("sample_std_x", m_sample_std_x, 0.5);
+		m_node_handle.param("sample_std_y", m_sample_std_y, 0.5);
+		m_node_handle.param("sample_std_yaw", m_sample_std_yaw, 0.5);
 
 		m_sub_scan_topic = m_node_handle.subscribe("/scan", 10, &NeoLocalizationNode::scan_callback, this);
 		m_sub_map_topic = m_node_handle.subscribe("/map", 1, &NeoLocalizationNode::map_callback, this);
@@ -105,7 +110,7 @@ protected:
 	{
 		std::lock_guard<std::mutex> lock(m_node_mutex);
 
-		if(!m_map_fine || !m_map_coarse) {
+		if(!m_map) {
 			return;
 		}
 
@@ -154,23 +159,53 @@ protected:
 			points.emplace_back(point);
 		}
 
-		// coarse localization
-		for(int iter = 0; iter < m_solver_iterations; ++iter)
+		// check for number of points
+		if(points.size() < 10)
 		{
-			m_solver.solve<float>(*m_map_coarse, points, 1);
-
-			ROS_INFO_STREAM("Coarse iter " << iter << ": pose_x=" << m_solver.pose_x << ", pose_y=" << m_solver.pose_y << ", pose_yaw=" << m_solver.pose_yaw
-					<< ", r_norm=" << m_solver.r_norm);
+			ROS_WARN_STREAM("Number of points too low: " << points.size());
+			return;
 		}
 
-		// fine localization
-		for(int iter = 0; iter < m_solver_iterations; ++iter)
-		{
-			m_solver.solve<float>(*m_map_fine, points, 1);
+		// setup distributions
+		std::normal_distribution<double> dist_x(m_solver.pose_x, m_sample_std_x);
+		std::normal_distribution<double> dist_y(m_solver.pose_y, m_sample_std_y);
+		std::normal_distribution<double> dist_yaw(m_solver.pose_yaw, m_sample_std_yaw);
 
-			ROS_INFO_STREAM("Fine iter " << iter << ": pose_x=" << m_solver.pose_x << ", pose_y=" << m_solver.pose_y << ", pose_yaw=" << m_solver.pose_yaw
-					<< ", r_norm=" << m_solver.r_norm);
+		// solve odometry prediction first
+		for(int iter = 0; iter < m_solver_iterations; ++iter) {
+			m_solver.solve<float>(*m_map, points, 1);
 		}
+
+		double best_x = m_solver.pose_x;
+		double best_y = m_solver.pose_y;
+		double best_yaw = m_solver.pose_yaw;
+		double best_score = m_solver.r_norm;
+
+		for(int i = 0; i < m_sample_rate; ++i)
+		{
+			// generate new sample
+			m_solver.pose_x = dist_x(m_generator);
+			m_solver.pose_y = dist_y(m_generator);
+			m_solver.pose_yaw = dist_yaw(m_generator);
+
+			// solve sample
+			for(int iter = 0; iter < m_solver_iterations; ++iter) {
+				m_solver.solve<float>(*m_map, points, 1);
+			}
+
+			// check if sample is better
+			if(m_solver.r_norm < best_score) {
+				best_x = m_solver.pose_x;
+				best_y = m_solver.pose_y;
+				best_yaw = m_solver.pose_yaw;
+				best_score = m_solver.r_norm;
+			}
+		}
+
+		// use best sample
+		m_solver.pose_x = best_x;
+		m_solver.pose_y = best_y;
+		m_solver.pose_yaw = best_yaw;
 
 		// get new pose from solver
 		const Matrix<double, 4, 4> grid_pose_new = translate25(m_solver.pose_x, m_solver.pose_y) * rotate25_z(m_solver.pose_yaw);
@@ -250,15 +285,18 @@ protected:
 			}
 		}
 
-		auto fine = map;
-		auto coarse = map->downscale()->downscale();		// coarse is 4x lower resolution
-
-		for(int i = 0; i < m_num_smooth; ++i) {
-			ROS_INFO_STREAM("Smooth iter " << i);
-			fine->smooth_33_1();
-			coarse->smooth_33_1();
+		// downscale map if requested
+		for(int i = 0; i < m_map_downscale; ++i) {
+			map = map->downscale();
 		}
 
+		// smooth map
+		for(int i = 0; i < m_num_smooth; ++i) {
+			ROS_INFO_STREAM("Smooth iter " << i);
+			map->smooth_33_1();
+		}
+
+		// set new map and grid offset
 		{
 			std::lock_guard<std::mutex> lock(m_node_mutex);
 			{
@@ -266,8 +304,7 @@ protected:
 				tf::poseMsgToTF(ros_map->info.origin, tmp);
 				m_grid_to_map = convert_transform_25(tmp);
 			}
-			m_map_fine = fine;
-			m_map_coarse = coarse;
+			m_map = map;
 		}
 	}
 
@@ -312,9 +349,13 @@ private:
 	std::string m_map_frame;
 
 	double m_update_gain = 0;
-	int m_map_sub_sample = 0;
+	int m_map_downscale = 0;
 	int m_num_smooth = 0;
 	int m_solver_iterations = 0;
+	int m_sample_rate = 0;
+	double m_sample_std_x = 0;
+	double m_sample_std_y = 0;
+	double m_sample_std_yaw = 0;
 
 	double m_offset_x = 0;			// current x offset between odom and map
 	double m_offset_y = 0;			// current y offset between odom and map
@@ -322,10 +363,10 @@ private:
 	ros::Time m_offset_time;
 
 	Matrix<double, 4, 4> m_grid_to_map;
+	std::shared_ptr<GridMap<float>> m_map;
 
 	Solver m_solver;
-	std::shared_ptr<GridMap<float>> m_map_fine;
-	std::shared_ptr<GridMap<float>> m_map_coarse;
+	std::mt19937 m_generator;
 
 };
 
