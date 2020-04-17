@@ -21,6 +21,7 @@
 #include <tf/transform_datatypes.h>
 
 #include <mutex>
+#include <thread>
 #include <random>
 
 
@@ -89,11 +90,13 @@ public:
 		m_node_handle.param<std::string>("base_frame", m_base_frame, "base_link");
 		m_node_handle.param<std::string>("odom_frame", m_odom_frame, "odom");
 		m_node_handle.param<std::string>("map_frame", m_map_frame, "map");
+		m_node_handle.param("map_size", m_map_size, 1000);
 		m_node_handle.param("map_downscale", m_map_downscale, 0);
+		m_node_handle.param("map_update_rate", m_map_update_rate, 0.5);
 		m_node_handle.param("num_smooth", m_num_smooth, 5);
-		m_node_handle.param("solver_iterations", m_solver_iterations, 20);
 		m_node_handle.param("solver_gain", m_solver.gain, 0.1);
 		m_node_handle.param("solver_damping", m_solver.damping, 1000.);
+		m_node_handle.param("solver_iterations", m_solver_iterations, 20);
 		m_node_handle.param("sample_rate", m_sample_rate, 10);
 		m_node_handle.param("update_gain", m_update_gain, 0.5);
 		m_node_handle.param("confidence_gain", m_confidence_gain, 0.01);
@@ -105,30 +108,40 @@ public:
 		m_sub_scan_topic = m_node_handle.subscribe("/scan", 10, &NeoLocalizationNode::scan_callback, this);
 		m_sub_map_topic = m_node_handle.subscribe("/map", 1, &NeoLocalizationNode::map_callback, this);
 		m_sub_pose_estimate = m_node_handle.subscribe("/initialpose", 1, &NeoLocalizationNode::pose_callback, this);
+
+		m_update_thread = std::thread(&NeoLocalizationNode::update_loop, this);
+	}
+
+	~NeoLocalizationNode()
+	{
+		if(m_update_thread.joinable()) {
+			m_update_thread.join();
+		}
 	}
 
 protected:
 	void scan_callback(const sensor_msgs::LaserScan::ConstPtr& scan)
 	{
 		std::lock_guard<std::mutex> lock(m_node_mutex);
-
 		if(!m_map) {
 			return;
 		}
 
 		tf::StampedTransform sensor_to_base;
 		try {
+			m_tf.waitForTransform(m_base_frame, scan->header.frame_id, scan->header.stamp, ros::Duration(0.2));
 			m_tf.lookupTransform(m_base_frame, scan->header.frame_id, scan->header.stamp, sensor_to_base);
-		} catch(...) {
-			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(scan->header.frame_id, m_base_frame) failed!");
+		} catch(const std::exception& ex) {
+			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(scan->header.frame_id, m_base_frame) failed: " << ex.what());
 			return;
 		}
 
 		tf::StampedTransform base_to_odom;
 		try {
+			m_tf.waitForTransform(m_odom_frame, m_base_frame, scan->header.stamp, ros::Duration(0.2));
 			m_tf.lookupTransform(m_odom_frame, m_base_frame, scan->header.stamp, base_to_odom);
-		} catch(...) {
-			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(m_base_frame, m_odom_frame) failed!");
+		} catch(const std::exception& ex) {
+			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(m_base_frame, m_odom_frame) failed: " << ex.what());
 			return;
 		}
 
@@ -147,8 +160,8 @@ protected:
 
 		for(size_t i = 0; i < scan->ranges.size(); ++i)
 		{
-			if(scan->ranges[i] <= 0) {
-				continue;	// no measurement
+			if(scan->ranges[i] <= scan->range_min || scan->ranges[i] >= scan->range_max) {
+				continue;	// no actual measurement
 			}
 
 			// transform sensor points into base coordinate system
@@ -164,7 +177,7 @@ protected:
 		// check for number of points
 		if(points.size() < 10)
 		{
-			ROS_WARN_STREAM("Number of points too low: " << points.size());
+			ROS_WARN_STREAM("NeoLocalizationNode: Number of points too low: " << points.size());
 			return;
 		}
 
@@ -218,76 +231,120 @@ protected:
 				(m_grid_to_map * grid_pose_new * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
 		// apply new offset with an exponential low pass filter
-		m_offset_x = new_offset[0] * m_update_gain + m_offset_x * (1 - m_update_gain);
-		m_offset_y = new_offset[1] * m_update_gain + m_offset_y * (1 - m_update_gain);
-		m_offset_yaw += angles::shortest_angular_distance(m_offset_yaw, new_offset[2]) * m_update_gain;
+		const double gain_factor = double(points.size()) / scan->ranges.size();
+		const double gain = fmin(m_update_gain * gain_factor, 1);
+		m_offset_x = new_offset[0] * gain + m_offset_x * (1 - gain);
+		m_offset_y = new_offset[1] * gain + m_offset_y * (1 - gain);
+		m_offset_yaw += angles::shortest_angular_distance(m_offset_yaw, new_offset[2]) * gain;
 		m_offset_time = scan->header.stamp;
 
 		// apply confidence gain
-		m_confidence += (m_max_confidence - m_confidence) * 0.01;
+		m_confidence += (m_max_confidence - m_confidence) * 0.01 * gain_factor;
 
 		// publish new transform
 		broadcast();
 
-		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << best_score << ", confidence=" << m_confidence);
+		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << best_score << ", gain=" << gain << ", confidence=" << m_confidence);
 	}
 
 	void pose_callback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose)
 	{
-		std::lock_guard<std::mutex> lock(m_node_mutex);
+		{
+			std::lock_guard<std::mutex> lock(m_node_mutex);
 
-		if(pose->header.frame_id != m_map_frame) {
-			ROS_WARN_STREAM("NeoLocalizationNode: Invalid pose estimate frame: " << pose->header.frame_id);
-			return;
+			if(pose->header.frame_id != m_map_frame) {
+				ROS_WARN_STREAM("NeoLocalizationNode: Invalid pose estimate frame: " << pose->header.frame_id);
+				return;
+			}
+
+			tf::Transform map_pose;
+			tf::poseMsgToTF(pose->pose.pose, map_pose);
+
+			ROS_INFO_STREAM("NeoLocalizationNode: Got new map pose estimate: x=" << map_pose.getOrigin()[0]
+							<< ", y=" <<  map_pose.getOrigin()[1] << ", yaw=" << tf::getYaw(map_pose.getRotation()));
+
+			tf::StampedTransform base_to_odom;
+			try {
+				m_tf.lookupTransform(m_odom_frame, m_base_frame, ros::Time(), base_to_odom);
+			} catch(const std::exception& ex) {
+				ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(m_base_frame, m_odom_frame) failed: " << ex.what());
+				return;
+			}
+
+			const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
+
+			// compute new odom to map offset
+			const Matrix<double, 3, 1> new_offset =
+					(convert_transform_25(map_pose) * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
+
+			m_offset_x = new_offset[0];
+			m_offset_y = new_offset[1];
+			m_offset_yaw = new_offset[2];
+			m_offset_time = pose->header.stamp;
+
+			// reset confidence to zero
+			m_confidence = 0;
+
+			broadcast();
 		}
-
-		tf::Transform map_pose;
-		tf::poseMsgToTF(pose->pose.pose, map_pose);
-
-		tf::StampedTransform base_to_odom;
-		try {
-			m_tf.lookupTransform(m_odom_frame, m_base_frame, ros::Time(), base_to_odom);
-		} catch(...) {
-			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(m_base_frame, m_odom_frame) failed!");
-			return;
-		}
-
-		const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
-
-		// compute new odom to map offset
-		const Matrix<double, 3, 1> new_offset =
-				(convert_transform_25(map_pose) * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
-
-		m_offset_x = new_offset[0];
-		m_offset_y = new_offset[1];
-		m_offset_yaw = new_offset[2];
-		m_offset_time = pose->header.stamp;
-
-		// reset confidence to zero
-		m_confidence = 0;
-
-		broadcast();
-
-		ROS_INFO_STREAM("NeoLocalizationNode: Got new pose estimate!");
+		update_map();
 	}
 
 	void map_callback(const nav_msgs::OccupancyGrid::ConstPtr& ros_map)
 	{
-		ROS_INFO_STREAM("NeoLocalizationNode: Got map with dimensions " << ros_map->info.width << " x " << ros_map->info.height
+		std::lock_guard<std::mutex> lock(m_node_mutex);
+
+		ROS_INFO_STREAM("NeoLocalizationNode: Got new map with dimensions " << ros_map->info.width << " x " << ros_map->info.height
 				<< " and cell size " << ros_map->info.resolution);
 
-		if(ros_map->info.width != ros_map->info.height)
 		{
-			ROS_WARN_STREAM("NeoLocalizationNode: Invalid map dimensions!");
-			return;
+			tf::Transform tmp;
+			tf::poseMsgToTF(ros_map->info.origin, tmp);
+			m_world_to_map = convert_transform_25(tmp);
+		}
+		m_world = ros_map;
+		m_confidence = 0;
+	}
+
+	void update_map()
+	{
+		Matrix<double, 4, 4> world_to_map;
+		Matrix<double, 3, 1> world_pose;
+		tf::StampedTransform base_to_odom;
+		nav_msgs::OccupancyGrid::ConstPtr world;
+		{
+			std::lock_guard<std::mutex> lock(m_node_mutex);
+			if(!m_world) {
+				return;
+			}
+
+			try {
+				m_tf.lookupTransform(m_odom_frame, m_base_frame, ros::Time(), base_to_odom);
+			} catch(const std::exception& ex) {
+				ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(m_base_frame, m_odom_frame) failed: " << ex.what());
+				return;
+			}
+
+			const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
+			const Matrix<double, 4, 4> T = translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw);		// odom to map
+			world_pose = (m_world_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
+
+			world = m_world;
+			world_to_map = m_world_to_map;
 		}
 
-		auto map = std::make_shared<GridMap<float>>(ros_map->info.width, ros_map->info.resolution);
+		const double world_scale = world->info.resolution;
+		const int tile_x = int(world_pose[0] / world_scale) - m_map_size / 2;
+		const int tile_y = int(world_pose[1] / world_scale) - m_map_size / 2;
+
+		auto map = std::make_shared<GridMap<float>>(m_map_size, world_scale);
 
 		// convert map to our format (occupancy between 0 and 1)
 		for(int y = 0; y < map->size(); ++y) {
 			for(int x = 0; x < map->size(); ++x) {
-				const auto cell = ros_map->data[y * map->size() + x];
+				const int x_ = std::min(std::max(tile_x + x, 0), int(world->info.width) - 1);
+				const int y_ = std::min(std::max(tile_y + y, 0), int(world->info.height) - 1);
+				const auto cell = world->data[y_ * world->info.width + x_];
 				if(cell >= 0) {
 					(*map)(x, y) = fminf(cell / 100.f, 1.f);
 				} else {
@@ -296,27 +353,44 @@ protected:
 			}
 		}
 
-		// downscale map if requested
+		// downscale map
 		for(int i = 0; i < m_map_downscale; ++i) {
 			map = map->downscale();
 		}
 
 		// smooth map
 		for(int i = 0; i < m_num_smooth; ++i) {
-			ROS_INFO_STREAM("Smooth iter " << i);
 			map->smooth_33_1();
 		}
 
-		// set new map and grid offset
+		// update map
 		{
 			std::lock_guard<std::mutex> lock(m_node_mutex);
-			{
-				tf::Transform tmp;
-				tf::poseMsgToTF(ros_map->info.origin, tmp);
-				m_grid_to_map = convert_transform_25(tmp);
-			}
 			m_map = map;
-			m_confidence = 0;
+			m_grid_to_map = world_to_map * translate25<double>(tile_x * world_scale, tile_y * world_scale);
+		}
+
+		const auto tile_center = (m_grid_to_map * Matrix<double, 4, 1>{	map->scale() * m_map_size / 2,
+																		map->scale() * m_map_size / 2, 0, 1}).project();
+
+		ROS_INFO_STREAM("NeoLocalizationNode: Got new grid at offset (" << tile_x << ", " << tile_y << ") [iworld], "
+				"center = (" << tile_center[0] << ", " << tile_center[1] << ") [map]");
+
+		// publish map
+		// TODO
+	}
+
+	void update_loop()
+	{
+		ros::Rate rate(m_map_update_rate);
+		while(ros::ok()) {
+			try {
+				update_map();
+			}
+			catch(const std::exception& ex) {
+				ROS_WARN_STREAM("NeoLocalizationNode: update_map() failed: " << ex.what());
+			}
+			rate.sleep();
 		}
 	}
 
@@ -360,6 +434,7 @@ private:
 	std::string m_odom_frame;
 	std::string m_map_frame;
 
+	int m_map_size = 0;
 	int m_map_downscale = 0;
 	int m_num_smooth = 0;
 	int m_solver_iterations = 0;
@@ -370,6 +445,7 @@ private:
 	double m_sample_std_x = 0;
 	double m_sample_std_y = 0;
 	double m_sample_std_yaw = 0;
+	double m_map_update_rate = 0;
 
 	double m_offset_x = 0;			// current x offset between odom and map
 	double m_offset_y = 0;			// current y offset between odom and map
@@ -378,10 +454,13 @@ private:
 	ros::Time m_offset_time;
 
 	Matrix<double, 4, 4> m_grid_to_map;
-	std::shared_ptr<GridMap<float>> m_map;
+	Matrix<double, 4, 4> m_world_to_map;
+	std::shared_ptr<GridMap<float>> m_map;			// map tile
+	nav_msgs::OccupancyGrid::ConstPtr m_world;		// whole map
 
 	Solver m_solver;
 	std::mt19937 m_generator;
+	std::thread m_update_thread;
 
 };
 

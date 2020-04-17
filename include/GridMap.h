@@ -63,6 +63,12 @@ public:
 		return int64_t(m_size) * m_size;
 	}
 
+	void clear(const T& value) const {
+		for(int64_t i = 0; i < num_cells(); ++i) {
+			m_map[i] = value;
+		}
+	}
+
 	T& operator()(int x, int y)
 	{
 		return m_map[int64_t(y) * m_size + x];
