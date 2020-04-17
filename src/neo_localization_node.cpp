@@ -109,6 +109,8 @@ public:
 		m_sub_map_topic = m_node_handle.subscribe("/map", 1, &NeoLocalizationNode::map_callback, this);
 		m_sub_pose_estimate = m_node_handle.subscribe("/initialpose", 1, &NeoLocalizationNode::pose_callback, this);
 
+		m_pub_map_tile = m_node_handle.advertise<nav_msgs::OccupancyGrid>("/map_tile", 1);
+
 		m_update_thread = std::thread(&NeoLocalizationNode::update_loop, this);
 	}
 
@@ -370,14 +372,28 @@ protected:
 			m_grid_to_map = world_to_map * translate25<double>(tile_x * world_scale, tile_y * world_scale);
 		}
 
+		const auto tile_origin = (m_grid_to_map * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 		const auto tile_center = (m_grid_to_map * Matrix<double, 4, 1>{	map->scale() * m_map_size / 2,
 																		map->scale() * m_map_size / 2, 0, 1}).project();
 
+		// publish map
+		auto ros_grid = boost::make_shared<nav_msgs::OccupancyGrid>();
+		ros_grid->info.resolution = map->scale();
+		ros_grid->info.width = map->size();
+		ros_grid->info.height = map->size();
+		ros_grid->info.origin.position.x = tile_origin[0];
+		ros_grid->info.origin.position.y = tile_origin[1];
+		tf::quaternionTFToMsg(tf::createQuaternionFromYaw(tile_origin[2]), ros_grid->info.origin.orientation);
+		ros_grid->data.resize(map->num_cells());
+		for(int y = 0; y < map->size(); ++y) {
+			for(int x = 0; x < map->size(); ++x) {
+				ros_grid->data[y * map->size() + x] = (*map)(x, y) * 100.f;
+			}
+		}
+		m_pub_map_tile.publish(ros_grid);
+
 		ROS_INFO_STREAM("NeoLocalizationNode: Got new grid at offset (" << tile_x << ", " << tile_y << ") [iworld], "
 				"center = (" << tile_center[0] << ", " << tile_center[1] << ") [map]");
-
-		// publish map
-		// TODO
 	}
 
 	void update_loop()
@@ -420,7 +436,7 @@ private:
 
 	ros::NodeHandle m_node_handle;
 
-	ros::Publisher m_pub_smoothed_map;
+	ros::Publisher m_pub_map_tile;
 
 	ros::Subscriber m_sub_map_topic;
 	ros::Subscriber m_sub_scan_topic;
