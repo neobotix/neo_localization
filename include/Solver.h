@@ -62,9 +62,6 @@ public:
 		Matrix<double, 3, 1> G;			// gradient vector
 		Matrix<double, 3, 3> H;			// hessian matrix
 
-		G.setZero();
-		H.setZero();
-
 		const float inv_scale = map.inv_scale();
 		const Matrix<double, 3, 3> P = translate2(pose_x, pose_y) * rotate2_z(pose_yaw);
 
@@ -72,7 +69,7 @@ public:
 
 		for(const auto& point : points)
 		{
-			const Vector3d q = P * Vector3d(point.x, point.y, 1);
+			const auto q = P * Matrix<double, 3, 1>{point.x, point.y, 1};
 			const float grid_x = q[0] * inv_scale - 0.5f;
 			const float grid_y = q[1] * inv_scale - 0.5f;
 
@@ -111,7 +108,7 @@ public:
 		H(1, 1) += damping;
 		H(2, 2) += damping;
 
-		const Vector3d X = H.inverse() * G;
+		const auto X = H.inverse() * G;
 		pose_x -= gain * X[0];
 		pose_y -= gain * X[1];
 		pose_yaw -= gain * X[2];

@@ -8,6 +8,7 @@
 #include "../include/GridMap.h"
 #include "../include/Solver.h"
 
+
 #include <ros/ros.h>
 #include <angles/angles.h>
 #include <nav_msgs/Odometry.h>
@@ -18,9 +19,6 @@
 #include <tf/transform_listener.h>
 #include <tf/transform_broadcaster.h>
 #include <tf/transform_datatypes.h>
-
-#include <Eigen/Dense>
-using namespace Eigen;
 
 #include <mutex>
 #include <thread>
@@ -64,7 +62,6 @@ inline
 Matrix<double, 4, 4> convert_transform_25(const tf::Transform& trans)
 {
 	Matrix<double, 4, 4> res;
-	res.setZero();
 	res(0, 0) = trans.getBasis()[0][0];
 	res(1, 0) = trans.getBasis()[1][0];
 	res(0, 1) = trans.getBasis()[0][1];
@@ -81,7 +78,6 @@ inline
 Matrix<double, 4, 4> convert_transform_3(const tf::Transform& trans)
 {
 	Matrix<double, 4, 4> res;
-	res.setZero();
 	for(int j = 0; j < 3; ++j) {
 		for(int i = 0; i < 3; ++i) {
 			res(i, j) = trans.getBasis()[i][j];
@@ -134,8 +130,6 @@ public:
 		}
 	}
 
-	EIGEN_MAKE_ALIGNED_OPERATOR_NEW;
-
 protected:
 	void scan_callback(const sensor_msgs::LaserScan::ConstPtr& scan)
 	{
@@ -166,7 +160,7 @@ protected:
 		const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 		const Matrix<double, 4, 4> T = translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw);		// odom to map
 
-		const Matrix<double, 4, 1> grid_pose = m_grid_to_map.inverse() * T * L * Vector4d(0, 0, 0, 1);
+		const Matrix<double, 4, 1> grid_pose = m_grid_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1};
 
 		// set initial guess to odometry prediction
 		m_solver.pose_x = grid_pose[0];
@@ -183,7 +177,7 @@ protected:
 
 			// transform sensor points into base coordinate system
 			const Matrix<double, 4, 1> scan_pos = S * rotate3_z<double>(scan->angle_min + i * scan->angle_increment)
-													* Vector4d(scan->ranges[i], 0, 0, 1);
+													* Matrix<double, 4, 1>{scan->ranges[i], 0, 0, 1};
 			scan_point_t point;
 			point.x = scan_pos[0];
 			point.y = scan_pos[1];
@@ -244,7 +238,8 @@ protected:
 		const Matrix<double, 4, 4> grid_pose_new = translate25(m_solver.pose_x, m_solver.pose_y) * rotate25_z(m_solver.pose_yaw);
 
 		// compute new odom to map offset from new pose
-		const Matrix<double, 4, 1> new_offset = m_grid_to_map * grid_pose_new * L.inverse() * Vector4d(0, 0, 0, 1);
+		const Matrix<double, 4, 1> new_offset =
+				m_grid_to_map * grid_pose_new * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1};
 
 		// apply new offset with an exponential low pass filter
 		const double gain_factor = double(points.size()) / scan->ranges.size();
@@ -290,7 +285,8 @@ protected:
 			const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 
 			// compute new odom to map offset
-			const Matrix<double, 4, 1> new_offset = convert_transform_25(map_pose) * L.inverse() * Vector4d(0, 0, 0, 1);
+			const Matrix<double, 4, 1> new_offset =
+					convert_transform_25(map_pose) * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1};
 
 			m_offset_x = new_offset[0];
 			m_offset_y = new_offset[1];
@@ -342,7 +338,7 @@ protected:
 
 			const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 			const Matrix<double, 4, 4> T = translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw);		// odom to map
-			world_pose = m_world_to_map.inverse() * T * L * Vector4d(0, 0, 0, 1);
+			world_pose = m_world_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1};
 
 			world = m_world;
 			world_to_map = m_world_to_map;
@@ -385,9 +381,9 @@ protected:
 			m_grid_to_map = world_to_map * translate25<double>(tile_x * world_scale, tile_y * world_scale);
 		}
 
-		const Vector4d tile_origin = m_grid_to_map * Vector4d(0, 0, 0, 1);
-		const Vector4d tile_center = m_grid_to_map * Vector4d(	map->scale() * m_map_size / 2,
-																map->scale() * m_map_size / 2, 0, 1);
+		const auto tile_origin = m_grid_to_map * Matrix<double, 4, 1>{0, 0, 0, 1};
+		const auto tile_center = m_grid_to_map * Matrix<double, 4, 1>{	map->scale() * m_map_size / 2,
+																		map->scale() * m_map_size / 2, 0, 1};
 
 		// publish map
 		auto ros_grid = boost::make_shared<nav_msgs::OccupancyGrid>();
