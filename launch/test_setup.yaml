@@ -9,8 +9,9 @@ solver_gain: 0.1
 solver_damping: 1000
 solver_iterations: 20
 sample_rate: 10
-sample_std_x: 0.5
-sample_std_y: 0.5
+sample_std_xy: 0.5
 sample_std_yaw: 0.5
+constrain_threshold: 100
+disable_threshold: 1
 broadcast_tf: true
 
