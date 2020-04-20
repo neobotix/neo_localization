@@ -11,7 +11,7 @@ solver_iterations: 20
 sample_rate: 10
 sample_std_xy: 0.5
 sample_std_yaw: 0.5
-constrain_threshold: 100
+constrain_threshold: 0.3
 disable_threshold: 1
 broadcast_tf: true
 

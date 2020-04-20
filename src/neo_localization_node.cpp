@@ -194,7 +194,7 @@ public:
 		m_node_handle.param("max_confidence", m_max_confidence, 0.95);
 		m_node_handle.param("sample_std_xy", m_sample_std_xy, 0.5);
 		m_node_handle.param("sample_std_yaw", m_sample_std_yaw, 0.5);
-		m_node_handle.param("constrain_threshold", m_constrain_threshold, 100.);
+		m_node_handle.param("constrain_threshold", m_constrain_threshold, 0.2);
 		m_node_handle.param("disable_threshold", m_disable_threshold, 1.);
 
 		m_sub_scan_topic = m_node_handle.subscribe("/scan", 10, &NeoLocalizationNode::scan_callback, this);
@@ -353,20 +353,19 @@ protected:
 		const Matrix<double, 2, 1> sigma_uv {sqrt(fabs(eigen_values[0])), sqrt(fabs(eigen_values[1]))};
 
 		// compute seed variance along "measured" eigen vectors
-		const double seed_std_u = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xy, eigen_vectors[0]));
-		const double seed_std_v = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xy, eigen_vectors[1]));
+		const double seed_sigma_u = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xy, eigen_vectors[0]));
+		const double seed_sigma_v = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xy, eigen_vectors[1]));
 
 		// decide if we have 2D, 1D or 0D localization
 		const double factor_0 = fmax(sqrt(var_error) / 0.01, 0.1);
-		const double factor_1 = sigma_uv[0] / sigma_uv[1];
-		const double factor_2 = sigma_uv[0] / seed_std_u;
-		const double factor_3 = sigma_uv[1] / seed_std_v;
+		const double factor_1 = sigma_uv[0] / seed_sigma_u;
+		const double factor_2 = sigma_uv[1] / seed_sigma_v;
 
 		int mode = -1;
-		if(factor_3 / factor_0 > m_disable_threshold) {
-			mode = 0;		// high sigma_uv plus low var_error indicates no error gradient = nothing to localize with
-		} else if(factor_2 > 0.1 && factor_1 > m_constrain_threshold) {
-			mode = 1;		// high sigma imbalance means we can only localize in one direction
+		if(factor_2 / factor_0 > m_disable_threshold) {
+			mode = 0;		// high sigma_v plus low var_error indicates no error gradient = nothing to localize with
+		} else if(factor_1 > m_constrain_threshold && factor_2 < m_constrain_threshold) {
+			mode = 1;		// sigma imbalance (above the threshold) means we can/should only localize in one direction
 		} else {
 			mode = 2;		// all good
 		}
