@@ -26,36 +26,27 @@
 
 
 template<typename T>
-Matrix<T, 4, 4> rotate25_z(T rad)
-{
-	Matrix<T, 4, 4> mat;
-	mat <<  std::cos(rad), -std::sin(rad), 0, 0,
+Matrix<T, 4, 4> rotate25_z(T rad) {
+	return {std::cos(rad), -std::sin(rad), 0, 0,
 			std::sin(rad), std::cos(rad), 0, 0,
 			0, 0, 1, rad,
-			0, 0, 0, 1;
-	return mat;
+			0, 0, 0, 1};
 }
 
 template<typename T>
-Matrix<T, 4, 4> rotate3_z(T rad)
-{
-	Matrix<T, 4, 4> mat;
-	mat <<  std::cos(rad), -std::sin(rad), 0, 0,
+Matrix<T, 4, 4> rotate3_z(T rad) {
+	return {std::cos(rad), -std::sin(rad), 0, 0,
 			std::sin(rad), std::cos(rad), 0, 0,
 			0, 0, 1, 0,
-			0, 0, 0, 1;
-	return mat;
+			0, 0, 0, 1};
 }
 
 template<typename T>
-Matrix<T, 4, 4> translate25(T x, T y)
-{
-	Matrix<T, 4, 4> mat;
-	mat <<  1, 0, 0, x,
+Matrix<T, 4, 4> translate25(T x, T y) {
+	return {1, 0, 0, x,
 			0, 1, 0, y,
 			0, 0, 1, 0,
-			0, 0, 0, 1;
-	return mat;
+			0, 0, 0, 1};
 }
 
 inline
@@ -160,7 +151,7 @@ protected:
 		const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 		const Matrix<double, 4, 4> T = translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw);		// odom to map
 
-		const Matrix<double, 4, 1> grid_pose = m_grid_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1};
+		const Matrix<double, 3, 1> grid_pose = (m_grid_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
 		// set initial guess to odometry prediction
 		m_solver.pose_x = grid_pose[0];
@@ -176,8 +167,8 @@ protected:
 			}
 
 			// transform sensor points into base coordinate system
-			const Matrix<double, 4, 1> scan_pos = S * rotate3_z<double>(scan->angle_min + i * scan->angle_increment)
-													* Matrix<double, 4, 1>{scan->ranges[i], 0, 0, 1};
+			const Matrix<double, 3, 1> scan_pos = (S * rotate3_z<double>(scan->angle_min + i * scan->angle_increment)
+													* Matrix<double, 4, 1>{scan->ranges[i], 0, 0, 1}).project();
 			scan_point_t point;
 			point.x = scan_pos[0];
 			point.y = scan_pos[1];
@@ -238,8 +229,8 @@ protected:
 		const Matrix<double, 4, 4> grid_pose_new = translate25(m_solver.pose_x, m_solver.pose_y) * rotate25_z(m_solver.pose_yaw);
 
 		// compute new odom to map offset from new pose
-		const Matrix<double, 4, 1> new_offset =
-				m_grid_to_map * grid_pose_new * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1};
+		const Matrix<double, 3, 1> new_offset =
+				(m_grid_to_map * grid_pose_new * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
 		// apply new offset with an exponential low pass filter
 		const double gain_factor = double(points.size()) / scan->ranges.size();
@@ -285,8 +276,8 @@ protected:
 			const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 
 			// compute new odom to map offset
-			const Matrix<double, 4, 1> new_offset =
-					convert_transform_25(map_pose) * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1};
+			const Matrix<double, 3, 1> new_offset =
+					(convert_transform_25(map_pose) * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
 			m_offset_x = new_offset[0];
 			m_offset_y = new_offset[1];
@@ -320,7 +311,7 @@ protected:
 	void update_map()
 	{
 		Matrix<double, 4, 4> world_to_map;
-		Matrix<double, 4, 1> world_pose;
+		Matrix<double, 3, 1> world_pose;
 		tf::StampedTransform base_to_odom;
 		nav_msgs::OccupancyGrid::ConstPtr world;
 		{
@@ -338,7 +329,7 @@ protected:
 
 			const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 			const Matrix<double, 4, 4> T = translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw);		// odom to map
-			world_pose = m_world_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1};
+			world_pose = (m_world_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
 			world = m_world;
 			world_to_map = m_world_to_map;
@@ -381,9 +372,9 @@ protected:
 			m_grid_to_map = world_to_map * translate25<double>(tile_x * world_scale, tile_y * world_scale);
 		}
 
-		const auto tile_origin = m_grid_to_map * Matrix<double, 4, 1>{0, 0, 0, 1};
-		const auto tile_center = m_grid_to_map * Matrix<double, 4, 1>{	map->scale() * m_map_size / 2,
-																		map->scale() * m_map_size / 2, 0, 1};
+		const auto tile_origin = (m_grid_to_map * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
+		const auto tile_center = (m_grid_to_map * Matrix<double, 4, 1>{	map->scale() * m_map_size / 2,
+																		map->scale() * m_map_size / 2, 0, 1}).project();
 
 		// publish map
 		auto ros_grid = boost::make_shared<nav_msgs::OccupancyGrid>();

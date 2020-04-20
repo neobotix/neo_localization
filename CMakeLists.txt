@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.0)
+cmake_minimum_required(VERSION 2.8.3)
 project(neo_localization)
 
 set(CMAKE_CXX_STANDARD 11)
@@ -9,8 +9,6 @@ if(NOT CMAKE_BUILD_TYPE)
   	  CACHE STRING "Choose the type of build, options are: Debug Release RelWithDebInfo MinSizeRel."
       FORCE)
 endif(NOT CMAKE_BUILD_TYPE)
-
-find_package(Eigen3 REQUIRED)
 
 find_package(catkin REQUIRED
         COMPONENTS
@@ -25,7 +23,6 @@ find_package(catkin REQUIRED
 
 include_directories(
     include
-    ${EIGEN3_INCLUDE_DIR}
     ${catkin_INCLUDE_DIRS}
 )
 

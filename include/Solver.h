@@ -10,30 +10,23 @@
 
 #include "GridMap.h"
 
-#include <Eigen/Dense>
-using namespace Eigen;
+#include <neo_common/Matrix.h>
 
 #include <vector>
 
 
 template<typename T>
-Matrix<T, 3, 3> rotate2_z(T rad)
-{
-	Matrix<T, 3, 3> mat;
-	mat <<  std::cos(rad), -std::sin(rad), 0,
+Matrix<T, 3, 3> rotate2_z(T rad) {
+	return {std::cos(rad), -std::sin(rad), 0,
 			std::sin(rad), std::cos(rad), 0,
-			0, 0, 1;
-	return mat;
+			0, 0, 1};
 }
 
 template<typename T>
-Matrix<T, 3, 3> translate2(T x, T y)
-{
-	Matrix<T, 3, 3> mat;
-	mat <<  1, 0, x,
+Matrix<T, 3, 3> translate2(T x, T y) {
+	return {1, 0, x,
 			0, 1, y,
-			0, 0, 1;
-	return mat;
+			0, 0, 1};
 }
 
 struct scan_point_t
@@ -69,7 +62,7 @@ public:
 
 		for(const auto& point : points)
 		{
-			const auto q = P * Matrix<double, 3, 1>{point.x, point.y, 1};
+			const auto q = (P * Matrix<double, 3, 1>{point.x, point.y, 1}).project();
 			const float grid_x = q[0] * inv_scale - 0.5f;
 			const float grid_y = q[1] * inv_scale - 0.5f;
 
