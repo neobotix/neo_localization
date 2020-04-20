@@ -14,6 +14,7 @@
 #include <nav_msgs/Odometry.h>
 #include <nav_msgs/OccupancyGrid.h>
 #include <sensor_msgs/LaserScan.h>
+#include <geometry_msgs/PoseArray.h>
 #include <geometry_msgs/TransformStamped.h>
 #include <geometry_msgs/PoseWithCovarianceStamped.h>
 #include <tf/transform_listener.h>
@@ -110,6 +111,7 @@ public:
 		m_sub_pose_estimate = m_node_handle.subscribe("/initialpose", 1, &NeoLocalizationNode::pose_callback, this);
 
 		m_pub_map_tile = m_node_handle.advertise<nav_msgs::OccupancyGrid>("/map_tile", 1);
+		m_pub_pose_array = m_node_handle.advertise<geometry_msgs::PoseArray>("/particlecloud", 10);
 
 		m_update_thread = std::thread(&NeoLocalizationNode::update_loop, this);
 	}
@@ -183,6 +185,10 @@ protected:
 			return;
 		}
 
+		auto pose_array = boost::make_shared<geometry_msgs::PoseArray>();
+		pose_array->header.stamp = scan->header.stamp;
+		pose_array->header.frame_id = "map";
+
 		// setup distributions
 		const double rel_std_dev = fmax(1 - m_confidence, 0);
 		std::normal_distribution<double> dist_x(m_solver.pose_x, m_sample_std_x * rel_std_dev);
@@ -218,6 +224,18 @@ protected:
 				best_yaw = m_solver.pose_yaw;
 				best_score = m_solver.r_norm;
 			}
+
+			// add to visualization
+			{
+				const Matrix<double, 3, 1> map_pose = (m_grid_to_map *
+						Matrix<double, 4, 1>{m_solver.pose_x, m_solver.pose_y, m_solver.pose_yaw, 1}).project();
+				tf::Pose pose;
+				pose.setOrigin(tf::Vector3(map_pose[0], map_pose[1], 0));
+				pose.setRotation(tf::createQuaternionFromYaw(map_pose[2]));
+				geometry_msgs::Pose tmp;
+				tf::poseTFToMsg(pose, tmp);
+				pose_array->poses.push_back(tmp);
+			}
 		}
 
 		// use best sample
@@ -245,6 +263,9 @@ protected:
 
 		// publish new transform
 		broadcast();
+
+		// publish visualization
+		m_pub_pose_array.publish(pose_array);
 
 		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << best_score << ", gain=" << gain << ", confidence=" << m_confidence);
 	}
@@ -437,6 +458,7 @@ private:
 	ros::NodeHandle m_node_handle;
 
 	ros::Publisher m_pub_map_tile;
+	ros::Publisher m_pub_pose_array;
 
 	ros::Subscriber m_sub_map_topic;
 	ros::Subscriber m_sub_scan_topic;
