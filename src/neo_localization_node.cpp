@@ -405,10 +405,10 @@ protected:
 			} else {
 				// TODO: subtract confidence based on distance moved
 			}
-
-			// publish new transform
-			broadcast();
 		}
+
+		// publish new transform
+		broadcast();
 
 		// publish visualization
 		m_pub_pose_array.publish(pose_array);
