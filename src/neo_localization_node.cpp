@@ -191,6 +191,7 @@ public:
 		m_node_handle.param("sample_rate", m_sample_rate, 10);
 		m_node_handle.param("update_gain", m_update_gain, 0.5);
 		m_node_handle.param("confidence_gain", m_confidence_gain, 0.01);
+		m_node_handle.param("confidence_loss", m_confidence_loss, 0.1);
 		m_node_handle.param("max_confidence", m_max_confidence, 0.95);
 		m_node_handle.param("sample_std_xy", m_sample_std_xy, 0.5);
 		m_node_handle.param("sample_std_yaw", m_sample_std_yaw, 0.5);
@@ -243,6 +244,9 @@ protected:
 		const Matrix<double, 4, 4> S = convert_transform_3(sensor_to_base);
 		const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 		const Matrix<double, 4, 4> T = translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw);		// odom to map
+
+		const Matrix<double, 3, 1> odom_pose = (L * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
+		const double dist_moved = (odom_pose - m_last_odom_pose).get<2, 1>().norm();
 
 		std::vector<scan_point_t> points;
 
@@ -403,7 +407,7 @@ protected:
 				// apply confidence gain
 				m_confidence += (m_max_confidence - m_confidence) * m_confidence_gain * gain_factor;
 			} else {
-				// TODO: subtract confidence based on distance moved
+				m_confidence = fmax(m_confidence - dist_moved * m_confidence_loss, 0);
 			}
 		}
 
@@ -412,6 +416,9 @@ protected:
 
 		// publish visualization
 		m_pub_pose_array.publish(pose_array);
+
+		// keep last odom pose
+		m_last_odom_pose = odom_pose;
 
 		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << best_score << ", sigma_uv=[" << sigma_uv[0] << ", " << sigma_uv[1]
 				<< "] m, confidence=" << m_confidence << ", mode=" << mode << "D");
@@ -626,6 +633,7 @@ private:
 	int m_sample_rate = 0;
 	double m_update_gain = 0;
 	double m_confidence_gain = 0;
+	double m_confidence_loss = 0;
 	double m_max_confidence = 0;
 	double m_sample_std_xy = 0;
 	double m_sample_std_yaw = 0;
@@ -639,6 +647,7 @@ private:
 	double m_confidence = 0;		// current localization confidence
 	ros::Time m_offset_time;
 
+	Matrix<double, 3, 1> m_last_odom_pose;
 	Matrix<double, 4, 4> m_grid_to_map;
 	Matrix<double, 4, 4> m_world_to_map;
 	std::shared_ptr<GridMap<float>> m_map;			// map tile

@@ -1,6 +1,7 @@
 
 update_gain: 0.5
 confidence_gain: 0.01
+confidence_loss: 0.1
 max_confidence: 0.95
 map_size: 1000
 map_downscale: 0
