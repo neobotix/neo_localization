@@ -189,6 +189,7 @@ public:
 		m_node_handle.param("solver_damping", m_solver.damping, 1000.);
 		m_node_handle.param("solver_iterations", m_solver_iterations, 20);
 		m_node_handle.param("sample_rate", m_sample_rate, 10);
+		m_node_handle.param("min_points", m_min_points, 10);
 		m_node_handle.param("update_gain", m_update_gain, 0.5);
 		m_node_handle.param("confidence_gain", m_confidence_gain, 0.01);
 		m_node_handle.param("confidence_loss", m_confidence_loss, 0.1);
@@ -267,7 +268,7 @@ protected:
 		}
 
 		// check for number of points
-		if(points.size() < 10)
+		if(points.size() < m_min_points)
 		{
 			ROS_WARN_STREAM("NeoLocalizationNode: Number of points too low: " << points.size());
 			return;
@@ -631,6 +632,7 @@ private:
 	int m_num_smooth = 0;
 	int m_solver_iterations = 0;
 	int m_sample_rate = 0;
+	int m_min_points = 0;
 	double m_update_gain = 0;
 	double m_confidence_gain = 0;
 	double m_confidence_loss = 0;
