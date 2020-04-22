@@ -197,7 +197,8 @@ public:
 		m_node_handle.param("max_confidence", m_max_confidence, 0.95);
 		m_node_handle.param("sample_std_xy", m_sample_std_xy, 0.5);
 		m_node_handle.param("sample_std_yaw", m_sample_std_yaw, 0.5);
-		m_node_handle.param("constrain_threshold", m_constrain_threshold, 0.2);
+		m_node_handle.param("constrain_ratio", m_constrain_ratio, 0.2);
+		m_node_handle.param("constrain_threshold", m_constrain_threshold, 0.3);
 		m_node_handle.param("disable_threshold", m_disable_threshold, 1.);
 
 		m_sub_scan_topic = m_node_handle.subscribe("/scan", 10, &NeoLocalizationNode::scan_callback, this);
@@ -373,7 +374,7 @@ protected:
 		int mode = -1;
 		if(factor_2 / factor_0 > m_disable_threshold) {
 			mode = 0;		// high sigma_v plus low var_error indicates no error gradient = nothing to localize with
-		} else if(factor_1 > m_constrain_threshold && factor_2 < m_constrain_threshold) {
+		} else if(factor_1 > m_constrain_threshold && factor_2 < m_constrain_ratio * m_constrain_threshold) {
 			mode = 1;		// sigma imbalance (above the threshold) means we can/should only localize in one direction
 		} else {
 			mode = 2;		// all good
@@ -666,6 +667,7 @@ private:
 	double m_max_confidence = 0;
 	double m_sample_std_xy = 0;
 	double m_sample_std_yaw = 0;
+	double m_constrain_ratio = 0;
 	double m_constrain_threshold = 0;
 	double m_disable_threshold = 0;
 	double m_map_update_rate = 0;
