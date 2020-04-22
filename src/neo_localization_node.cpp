@@ -28,6 +28,9 @@
 #include <array>
 
 
+/*
+ * Creates a 2.5D (x, y, yaw) rotation matrix.
+ */
 template<typename T>
 Matrix<T, 4, 4> rotate25_z(T rad) {
 	return {std::cos(rad), -std::sin(rad), 0, 0,
@@ -36,6 +39,9 @@ Matrix<T, 4, 4> rotate25_z(T rad) {
 			0, 0, 0, 1};
 }
 
+/*
+ * Creates a 3D rotation matrix for a yaw rotation around Z axis.
+ */
 template<typename T>
 Matrix<T, 4, 4> rotate3_z(T rad) {
 	return {std::cos(rad), -std::sin(rad), 0, 0,
@@ -44,6 +50,9 @@ Matrix<T, 4, 4> rotate3_z(T rad) {
 			0, 0, 0, 1};
 }
 
+/*
+ * Creates a 2.5D (x, y, yaw) translation matrix.
+ */
 template<typename T>
 Matrix<T, 4, 4> translate25(T x, T y) {
 	return {1, 0, 0, x,
@@ -52,6 +61,9 @@ Matrix<T, 4, 4> translate25(T x, T y) {
 			0, 0, 0, 1};
 }
 
+/*
+ * Converts ROS 3D Transform to a 2.5D matrix.
+ */
 inline
 Matrix<double, 4, 4> convert_transform_25(const tf::Transform& trans)
 {
@@ -68,6 +80,9 @@ Matrix<double, 4, 4> convert_transform_25(const tf::Transform& trans)
 	return res;
 }
 
+/*
+ * Converts ROS 3D Transform to a 3D matrix.
+ */
 inline
 Matrix<double, 4, 4> convert_transform_3(const tf::Transform& trans)
 {
@@ -84,6 +99,9 @@ Matrix<double, 4, 4> convert_transform_3(const tf::Transform& trans)
 	return res;
 }
 
+/*
+ * Computes 1D variance.
+ */
 template<typename T>
 T compute_variance(const std::vector<double>& values, T& mean)
 {
@@ -104,6 +122,9 @@ T compute_variance(const std::vector<double>& values, T& mean)
 	return var;
 }
 
+/*
+ * Computes ND covariance matrix.
+ */
 template<typename T, size_t N, size_t M>
 Matrix<T, N, N> compute_covariance(const std::vector<Matrix<T, M, 1>>& points, Matrix<T, N, 1>& mean)
 {
@@ -131,6 +152,9 @@ Matrix<T, N, N> compute_covariance(const std::vector<Matrix<T, M, 1>>& points, M
 	return mat;
 }
 
+/*
+ * Computes 1D variance along a 2D axis (given by direction unit vector), around given mean position.
+ */
 template<typename T, size_t N>
 T compute_variance_along_direction_2(	const std::vector<Matrix<T, N, 1>>& points,
 										const Matrix<T, 2, 1>& mean,
@@ -174,6 +198,18 @@ Matrix<T, 2, 1> compute_eigenvectors_2(	const Matrix<T, 2, 2>& mat,
 }
 
 
+/*
+ * Coordinate systems:
+ * - Sensor in [meters, rad], aka. "laserX"
+ * - Base Link in [meters, rad], aka. "base_link"
+ * - Odometry in [meters, rad], aka. "odom"
+ * - Map in [meters, rad], aka. "map"
+ * - World Grid in [meters, rad], aka. "world"
+ * - Tile Grid in [meters, rad], aka. "grid"
+ * - World Grid in [pixels]
+ * - Tile Grid in [pixels]
+ *
+ */
 class NeoLocalizationNode {
 public:
 	NeoLocalizationNode()
@@ -221,6 +257,9 @@ public:
 	}
 
 protected:
+	/*
+	 * Computes localization update for a single laser scan.
+	 */
 	void scan_callback(const sensor_msgs::LaserScan::ConstPtr& scan)
 	{
 		std::lock_guard<std::mutex> lock(m_node_mutex);
@@ -410,9 +449,10 @@ protected:
 			m_offset_time = scan->header.stamp;
 
 			if(mode > 1) {
-				// apply confidence gain
+				// apply time based confidence gain
 				m_confidence += (m_max_confidence - m_confidence) * m_confidence_gain * gain_factor;
 			} else {
+				// apply confidence loss based on distance moved
 				m_confidence = fmax(m_confidence - dist_moved * m_confidence_loss, 0);
 			}
 		}
@@ -451,6 +491,9 @@ protected:
 				<< "] m, confidence=" << m_confidence << ", mode=" << mode << "D");
 	}
 
+	/*
+	 * Resets localization to given position.
+	 */
 	void pose_callback(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr& pose)
 	{
 		{
@@ -481,6 +524,7 @@ protected:
 			const Matrix<double, 3, 1> new_offset =
 					(convert_transform_25(map_pose) * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
+			// set new offset based on given position
 			m_offset_x = new_offset[0];
 			m_offset_y = new_offset[1];
 			m_offset_yaw = new_offset[2];
@@ -491,9 +535,14 @@ protected:
 
 			broadcast();
 		}
+
+		// get a new map tile immediately
 		update_map();
 	}
 
+	/*
+	 * Stores the given map.
+	 */
 	void map_callback(const nav_msgs::OccupancyGrid::ConstPtr& ros_map)
 	{
 		std::lock_guard<std::mutex> lock(m_node_mutex);
@@ -510,10 +559,13 @@ protected:
 		m_confidence = 0;
 	}
 
+	/*
+	 * Extracts a new map tile around current position.
+	 */
 	void update_map()
 	{
-		Matrix<double, 4, 4> world_to_map;
-		Matrix<double, 3, 1> world_pose;
+		Matrix<double, 4, 4> world_to_map;			// transformation from original grid map (integer coords) to "map frame"
+		Matrix<double, 3, 1> world_pose;			// pose in the original (integer coords) grid map (not map tile)
 		tf::StampedTransform base_to_odom;
 		nav_msgs::OccupancyGrid::ConstPtr world;
 		{
@@ -537,13 +589,14 @@ protected:
 			world_to_map = m_world_to_map;
 		}
 
+		// compute tile origin in pixel coords
 		const double world_scale = world->info.resolution;
 		const int tile_x = int(world_pose[0] / world_scale) - m_map_size / 2;
 		const int tile_y = int(world_pose[1] / world_scale) - m_map_size / 2;
 
 		auto map = std::make_shared<GridMap<float>>(m_map_size, world_scale);
 
-		// convert map to our format (occupancy between 0 and 1)
+		// extract tile and convert to our format (occupancy between 0 and 1)
 		for(int y = 0; y < map->size(); ++y) {
 			for(int x = 0; x < map->size(); ++x) {
 				const int x_ = std::min(std::max(tile_x + x, 0), int(world->info.width) - 1);
@@ -557,7 +610,7 @@ protected:
 			}
 		}
 
-		// downscale map
+		// optionally downscale map
 		for(int i = 0; i < m_map_downscale; ++i) {
 			map = map->downscale();
 		}
@@ -578,7 +631,7 @@ protected:
 		const auto tile_center = (m_grid_to_map * Matrix<double, 4, 1>{	map->scale() * m_map_size / 2,
 																		map->scale() * m_map_size / 2, 0, 1}).project();
 
-		// publish map
+		// publish new map tile for visualization
 		auto ros_grid = boost::make_shared<nav_msgs::OccupancyGrid>();
 		ros_grid->info.resolution = map->scale();
 		ros_grid->info.width = map->size();
@@ -598,12 +651,15 @@ protected:
 				"center = (" << tile_center[0] << ", " << tile_center[1] << ") [map]");
 	}
 
+	/*
+	 * Asynchronous map update loop, running in separate thread.
+	 */
 	void update_loop()
 	{
 		ros::Rate rate(m_map_update_rate);
 		while(ros::ok()) {
 			try {
-				update_map();
+				update_map();	// get a new map tile periodically
 			}
 			catch(const std::exception& ex) {
 				ROS_WARN_STREAM("NeoLocalizationNode: update_map() failed: " << ex.what());
@@ -612,6 +668,9 @@ protected:
 		}
 	}
 
+	/*
+	 * Publishes "map" frame on tf.
+	 */
 	void broadcast()
 	{
 		if(m_broadcast_tf)
