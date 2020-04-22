@@ -15,9 +15,16 @@
 #include <memory>
 
 
+/*
+ * Class for a quadratic grid map.
+ */
 template<typename T>
 class GridMap {
 public:
+	/*
+	 * @param size_ Size of map in pixels per axis
+	 * @param scale_ Size of one pixel in meters
+	 */
 	GridMap(int size_, float scale_)
 		:	m_size(size_),
 			m_scale(scale_)
@@ -25,6 +32,9 @@ public:
 		m_map = new T[int64_t(size_) * size_];
 	}
 
+	/*
+	 * Deep copy constructor.
+	 */
 	GridMap(const GridMap& other)
 		:	GridMap(other.m_size, other.m_scale)
 	{
@@ -37,6 +47,9 @@ public:
 		m_map = 0;
 	}
 
+	/*
+	 * Deep assignment operator.
+	 */
 	GridMap& operator=(const GridMap& other)
 	{
 		if(m_size != other.m_size) {
@@ -63,12 +76,18 @@ public:
 		return int64_t(m_size) * m_size;
 	}
 
+	/*
+	 * Sets all pixels to given value.
+	 */
 	void clear(const T& value) const {
 		for(int64_t i = 0; i < num_cells(); ++i) {
 			m_map[i] = value;
 		}
 	}
 
+	/*
+	 * Access a given cell.
+	 */
 	T& operator()(int x, int y)
 	{
 		return m_map[int64_t(y) * m_size + x];
@@ -79,6 +98,10 @@ public:
 		return m_map[int64_t(y) * m_size + x];
 	}
 
+	/*
+	 * Bilinear interpolation at given pixel position.
+	 * A coordinate of (0, 0) gives the exact value of the first pixel.
+	 */
 	float bilinear_lookup(float x, float y) const
 	{
 		const float a = x - floorf(x);
@@ -87,6 +110,9 @@ public:
 		return bilinear_lookup_ex(x, y, a, b);
 	}
 
+	/*
+	 * Same as bilinear_lookup() but with pre-computed offsets a and b.
+	 */
 	float bilinear_lookup_ex(int x, int y, float a, float b) const
 	{
 		const int x0 = std::min(std::max(x, 0), m_size - 1);
@@ -100,6 +126,10 @@ public:
 				+	(*this)(x1, y1) * (a * b);
 	}
 
+	/*
+	 * Computes gauss-filtered and bilinear-interpolated first-order x and y gradient
+	 * at given pixel position.
+	 */
 	void calc_gradient(float x, float y, float& dx, float& dy) const
 	{
 		static const float coeff_33_dxy[3][3] = {
@@ -129,6 +159,10 @@ public:
 		dy /= 2 * m_scale;
 	}
 
+	/*
+	 * Computes gauss-filtered and bilinear-interpolated second-order x and y gradient
+	 * at given pixel position.
+	 */
 	void calc_gradient2(float x, float y, float& ddx, float& ddy) const
 	{
 		static const float coeff_33_ddxy[3][3] = {
@@ -158,6 +192,9 @@ public:
 		ddy /= 2 * m_scale;
 	}
 
+	/*
+	 * Applies one smoothing iteration using a 3x3 gaussian kernel with sigma 1.
+	 */
 	void smooth_33_1()
 	{
 		static const float coeff_33_1[3][3] = {
@@ -184,6 +221,9 @@ public:
 		*this = tmp;
 	}
 
+	/*
+	 * Applies one smoothing iteration using a 5x5 gaussian kernel with sigma 2.
+	 */
 	void smooth_55_2()
 	{
 		static const float coeff_55_2[5][5] = {
@@ -212,6 +252,9 @@ public:
 		*this = tmp;
 	}
 
+	/*
+	 * Returns a 2x downscaled map using a 4x4 gaussian filter with sigma 1.
+	 */
 	std::shared_ptr<GridMap<T>> downscale()
 	{
 		static const float coeff_44_1[4][4] {
