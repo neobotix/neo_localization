@@ -104,28 +104,29 @@ T compute_variance(const std::vector<double>& values, T& mean)
 	return var;
 }
 
-template<typename T, size_t N>
-Matrix<T, 2, 2> compute_covariance_2(const std::vector<Matrix<T, N, 1>>& points, Matrix<T, 2, 1>& mean)
+template<typename T, size_t N, size_t M>
+Matrix<T, N, N> compute_covariance(const std::vector<Matrix<T, M, 1>>& points, Matrix<T, N, 1>& mean)
 {
-	if(N < 2) {
-		throw std::logic_error("N < 2");
+	if(M < N) {
+		throw std::logic_error("M < N");
 	}
 	if(points.size() < 2) {
 		throw std::logic_error("points.size() < 2");
 	}
-	mean = Matrix<T, 2, 1>();
+	mean = Matrix<T, N, 1>();
 	for(auto point : points) {
-		mean += Matrix<T, 2, 1>{point[0], point[1]};
+		mean += point.template get<N, 1>();
 	}
 	mean /= T(points.size());
 
-	Matrix<T, 2, 2> mat;
+	Matrix<T, N, N> mat;
 	for(auto point : points) {
-		mat(0, 0) += std::pow(point[0] - mean[0], 2);
-		mat(1, 1) += std::pow(point[1] - mean[1], 2);
-		mat(1, 0) += (point[0] - mean[0]) * (point[1] - mean[1]);
+		for(int j = 0; j < N; ++j) {
+			for(int i = 0; i < N; ++i) {
+				mat(i, j) += (point[i] - mean[i]) * (point[j] - mean[j]);
+			}
+		}
 	}
-	mat(0, 1) = mat(1, 0);
 	mat /= T(points.size() - 1);
 	return mat;
 }
@@ -204,6 +205,8 @@ public:
 		m_sub_pose_estimate = m_node_handle.subscribe("/initialpose", 1, &NeoLocalizationNode::pose_callback, this);
 
 		m_pub_map_tile = m_node_handle.advertise<nav_msgs::OccupancyGrid>("/map_tile", 1);
+		m_pub_loc_pose = m_node_handle.advertise<geometry_msgs::PoseWithCovarianceStamped>("/amcl_pose", 10);
+		m_pub_loc_pose_2 = m_node_handle.advertise<geometry_msgs::PoseWithCovarianceStamped>("/map_pose", 10);
 		m_pub_pose_array = m_node_handle.advertise<geometry_msgs::PoseArray>("/particlecloud", 10);
 
 		m_update_thread = std::thread(&NeoLocalizationNode::update_loop, this);
@@ -276,7 +279,7 @@ protected:
 
 		auto pose_array = boost::make_shared<geometry_msgs::PoseArray>();
 		pose_array->header.stamp = scan->header.stamp;
-		pose_array->header.frame_id = "map";
+		pose_array->header.frame_id = m_map_frame;
 
 		// calc predicted grid pose based on odometry
 		const Matrix<double, 3, 1> grid_pose = (m_grid_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
@@ -346,20 +349,21 @@ protected:
 
 		// compute covariances
 		double mean_error = 0;
-		Matrix<double, 2, 1> mean_xy;
-		Matrix<double, 2, 1> seed_mean_xy;
+		double mean_yaw = 0;
+		Matrix<double, 3, 1> mean_xyw;
+		Matrix<double, 3, 1> seed_mean_xyw;
 		const double var_error = compute_variance(sample_errors, mean_error);
-		const Matrix<double, 2, 2> var_xy = compute_covariance_2(samples, mean_xy);
-		const Matrix<double, 2, 2> seed_var_xy = compute_covariance_2(seeds, seed_mean_xy);
+		const Matrix<double, 3, 3> var_xyw = compute_covariance(samples, mean_xyw);
+		const Matrix<double, 3, 3> seed_var_xyw = compute_covariance(seeds, seed_mean_xyw);
 
-		// compute "measured" error characteristic
+		// compute "estimated" error characteristic
 		std::array<Matrix<double, 2, 1>, 2> eigen_vectors;
-		const Matrix<double, 2, 1> eigen_values = compute_eigenvectors_2(var_xy, eigen_vectors);
+		const Matrix<double, 2, 1> eigen_values = compute_eigenvectors_2(var_xyw.get<2, 2>(), eigen_vectors);
 		const Matrix<double, 2, 1> sigma_uv {sqrt(fabs(eigen_values[0])), sqrt(fabs(eigen_values[1]))};
 
-		// compute seed variance along "measured" eigen vectors
-		const double seed_sigma_u = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xy, eigen_vectors[0]));
-		const double seed_sigma_v = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xy, eigen_vectors[1]));
+		// compute seed variance along "estimated" eigen vectors
+		const double seed_sigma_u = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xyw.get<2, 1>(), eigen_vectors[0]));
+		const double seed_sigma_v = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xyw.get<2, 1>(), eigen_vectors[1]));
 
 		// decide if we have 2D, 1D or 0D localization
 		const double factor_0 = fmax(sqrt(var_error) / 0.01, 0.1);
@@ -414,6 +418,27 @@ protected:
 
 		// publish new transform
 		broadcast();
+
+		const Matrix<double, 3, 1> new_map_pose = (translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw) *
+													L * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
+
+		// publish localization pose
+		auto loc_pose = boost::make_shared<geometry_msgs::PoseWithCovarianceStamped>();
+		loc_pose->header.stamp = m_offset_time;
+		loc_pose->header.frame_id = m_map_frame;
+		loc_pose->pose.pose.position.x = new_map_pose[0];
+		loc_pose->pose.pose.position.y = new_map_pose[1];
+		loc_pose->pose.pose.position.z = 0;
+		tf::quaternionTFToMsg(tf::createQuaternionFromYaw(new_map_pose[2]), loc_pose->pose.pose.orientation);
+		for(int j = 0; j < 3; ++j) {
+			for(int i = 0; i < 3; ++i) {
+				const int i_ = (i == 2 ? 5 : i);
+				const int j_ = (j == 2 ? 5 : j);
+				loc_pose->pose.covariance[j_ * 6 + i_] = var_xyw(i, j);
+			}
+		}
+		m_pub_loc_pose.publish(loc_pose);
+		m_pub_loc_pose_2.publish(loc_pose);
 
 		// publish visualization
 		m_pub_pose_array.publish(pose_array);
@@ -613,6 +638,8 @@ private:
 	ros::NodeHandle m_node_handle;
 
 	ros::Publisher m_pub_map_tile;
+	ros::Publisher m_pub_loc_pose;
+	ros::Publisher m_pub_loc_pose_2;
 	ros::Publisher m_pub_pose_array;
 
 	ros::Subscriber m_sub_map_topic;
