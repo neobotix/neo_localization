@@ -446,7 +446,10 @@ protected:
 			m_offset_x += (new_offset[0] - m_offset_x) * gain;
 			m_offset_y += (new_offset[1] - m_offset_y) * gain;
 			m_offset_yaw += angles::shortest_angular_distance(m_offset_yaw, new_offset[2]) * gain;
-			m_offset_time = scan->header.stamp;
+
+			if(scan->header.stamp > m_offset_time || (m_offset_time - scan->header.stamp).toSec() > 1) {
+				m_offset_time = scan->header.stamp;
+			}
 
 			if(mode > 1) {
 				// apply time based confidence gain
