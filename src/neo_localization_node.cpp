@@ -531,7 +531,6 @@ protected:
 			m_offset_x = new_offset[0];
 			m_offset_y = new_offset[1];
 			m_offset_yaw = new_offset[2];
-			m_offset_time = pose->header.stamp;
 
 			// reset confidence to zero
 			m_confidence = 0;
