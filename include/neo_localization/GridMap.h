@@ -25,18 +25,19 @@ public:
 	 * @param size_ Size of map in pixels per axis
 	 * @param scale_ Size of one pixel in meters
 	 */
-	GridMap(int size_, float scale_)
-		:	m_size(size_),
-			m_scale(scale_)
+	GridMap(int size_x, int size_y, float scale)
+		:	m_size_x(size_x),
+			m_size_y(size_y),
+			m_scale(scale)
 	{
-		m_map = new T[int64_t(size_) * size_];
+		m_map = new T[int64_t(size_x) * size_y];
 	}
 
 	/*
 	 * Deep copy constructor.
 	 */
 	GridMap(const GridMap& other)
-		:	GridMap(other.m_size, other.m_scale)
+		:	GridMap(other.m_size_x, other.m_size_y, other.m_scale)
 	{
 		*this = other;
 	}
@@ -52,16 +53,20 @@ public:
 	 */
 	GridMap& operator=(const GridMap& other)
 	{
-		if(m_size != other.m_size) {
+		if(m_size_x != other.m_size_x || m_size_y != other.m_size_y) {
 			throw std::logic_error("grid size mismatch");
 		}
 		m_scale = other.m_scale;
-		::memcpy(m_map, other.m_map, m_size * m_size * sizeof(T));
+		::memcpy(m_map, other.m_map, num_cells() * sizeof(T));
 		return *this;
 	}
 
-	int size() const {
-		return m_size;
+	int size_x() const {
+		return m_size_x;
+	}
+
+	int size_y() const {
+		return m_size_y;
 	}
 
 	float scale() const {
@@ -72,8 +77,8 @@ public:
 		return 1 / m_scale;
 	}
 
-	int64_t num_cells() const {
-		return int64_t(m_size) * m_size;
+	size_t num_cells() const {
+		return size_t(m_size_x) * m_size_y;
 	}
 
 	/*
@@ -86,16 +91,29 @@ public:
 	}
 
 	/*
-	 * Access a given cell.
+	 * Access a given cell by index.
+	 */
+	T& operator[](size_t index)
+	{
+		return m_map[index];
+	}
+
+	const T& operator[](size_t index) const
+	{
+		return m_map[index];
+	}
+
+	/*
+	 * Access a given cell by coordinate.
 	 */
 	T& operator()(int x, int y)
 	{
-		return m_map[int64_t(y) * m_size + x];
+		return m_map[size_t(y) * m_size_x + x];
 	}
 
 	const T& operator()(int x, int y) const
 	{
-		return m_map[int64_t(y) * m_size + x];
+		return m_map[size_t(y) * m_size_x + x];
 	}
 
 	/*
@@ -115,15 +133,43 @@ public:
 	 */
 	float bilinear_lookup_ex(int x, int y, float a, float b) const
 	{
-		const int x0 = std::min(std::max(x, 0), m_size - 1);
-		const int x1 = std::min(x0 + 1, m_size - 1);
-		const int y0 = std::min(std::max(y, 0), m_size - 1);
-		const int y1 = std::min(y0 + 1, m_size - 1);
+		const int x0 = std::min(std::max(x, 0), m_size_x - 1);
+		const int x1 = std::min(x0 + 1, m_size_x - 1);
+		const int y0 = std::min(std::max(y, 0), m_size_y - 1);
+		const int y1 = std::min(y0 + 1, m_size_y - 1);
 
 		return		(*this)(x0, y0) * ((1.f - a) * (1.f - b))
 				+	(*this)(x1, y0) * (a * (1.f - b))
 				+	(*this)(x0, y1) * ((1.f - a) * b)
 				+	(*this)(x1, y1) * (a * b);
+	}
+
+	/*
+	 * Bilinear summation at a given pixel position.
+	 * A coordinate of (0, 0) will sum at the first pixel exclusively.
+	 */
+	void bilinear_summation(float x, float y, const T& value) const
+	{
+		const float a = x - floorf(x);
+		const float b = y - floorf(y);
+
+		bilinear_summation_ex(x, y, a, b, value);
+	}
+
+	/*
+	 * Same as bilinear_summation() but with pre-computed offsets a and b.
+	 */
+	void bilinear_summation_ex(int x, int y, float a, float b, const T& value) const
+	{
+		const int x0 = std::min(std::max(x, 0), m_size_x - 1);
+		const int x1 = std::min(x0 + 1, m_size_x - 1);
+		const int y0 = std::min(std::max(y, 0), m_size_y - 1);
+		const int y1 = std::min(y0 + 1, m_size_y - 1);
+
+		(*this)(x0, y0) += value * ((1.f - a) * (1.f - b));
+		(*this)(x1, y0) += value * (a * (1.f - b));
+		(*this)(x0, y1) += value * ((1.f - a) * b);
+		(*this)(x1, y1) += value * (a * b);
 	}
 
 	/*
@@ -203,15 +249,15 @@ public:
 				{0.077847, 0.123317, 0.077847}
 		};
 
-		GridMap<T> tmp(m_size, m_scale);
+		GridMap<T> tmp(m_size_x, m_size_y, m_scale);
 
-		for(int y = 0; y < m_size; ++y) {
-			for(int x = 0; x < m_size; ++x) {
+		for(int y = 0; y < m_size_y; ++y) {
+			for(int x = 0; x < m_size_x; ++x) {
 				float sum = 0;
 				for(int j = -1; j <= 1; ++j) {
-					const int y_ = std::min(std::max(y + j, 0), m_size - 1);
+					const int y_ = std::min(std::max(y + j, 0), m_size_y - 1);
 					for(int i = -1; i <= 1; ++i) {
-						const int x_ = std::min(std::max(x + i, 0), m_size - 1);
+						const int x_ = std::min(std::max(x + i, 0), m_size_x - 1);
 						sum += coeff_33_1[j+1][i+1] * (*this)(x_, y_);
 					}
 				}
@@ -234,15 +280,15 @@ public:
 				{0.0232468, 0.033824, 0.0383276, 0.033824, 0.0232468}
 		};
 
-		GridMap<T> tmp(m_size, m_scale);
+		GridMap<T> tmp(m_size_x, m_size_y, m_scale);
 
-		for(int y = 0; y < m_size; ++y) {
-			for(int x = 0; x < m_size; ++x) {
+		for(int y = 0; y < m_size_y; ++y) {
+			for(int x = 0; x < m_size_x; ++x) {
 				float sum = 0;
 				for(int j = -2; j <= 2; ++j) {
-					const int y_ = std::min(std::max(y + j, 0), m_size - 1);
+					const int y_ = std::min(std::max(y + j, 0), m_size_y - 1);
 					for(int i = -2; i <= 2; ++i) {
-						const int x_ = std::min(std::max(x + i, 0), m_size - 1);
+						const int x_ = std::min(std::max(x + i, 0), m_size_x - 1);
 						sum += coeff_55_2[j+2][i+2] * (*this)(x_, y_);
 					}
 				}
@@ -264,15 +310,15 @@ public:
 			{0.0180824, 0.049153, 0.049153, 0.0180824}
 		};
 
-		auto res = std::make_shared<GridMap<T>>(m_size / 2, m_scale * 2);
+		auto res = std::make_shared<GridMap<T>>(m_size_x / 2, m_size_y / 2, m_scale * 2);
 
-		for(int y = 0; y < m_size / 2; ++y) {
-			for(int x = 0; x < m_size / 2; ++x) {
+		for(int y = 0; y < m_size_y / 2; ++y) {
+			for(int x = 0; x < m_size_x / 2; ++x) {
 				float sum = 0;
 				for(int j = -1; j <= 2; ++j) {
-					const int y_ = std::min(std::max(y * 2 + j, 0), m_size - 1);
+					const int y_ = std::min(std::max(y * 2 + j, 0), m_size_y - 1);
 					for(int i = -1; i <= 2; ++i) {
-						const int x_ = std::min(std::max(x * 2 + i, 0), m_size - 1);
+						const int x_ = std::min(std::max(x * 2 + i, 0), m_size_x - 1);
 						sum += coeff_44_1[j+1][i+1] * (*this)(x_, y_);
 					}
 				}
@@ -283,7 +329,8 @@ public:
 	}
 
 private:
-	int m_size = 0;
+	int m_size_x = 0;
+	int m_size_y = 0;
 	float m_scale = 0;
 
 	T* m_map = 0;

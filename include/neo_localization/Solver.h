@@ -8,32 +8,18 @@
 #ifndef INCLUDE_SOLVER_H_
 #define INCLUDE_SOLVER_H_
 
-#include "GridMap.h"
-
 #include <neo_common/Matrix.h>
+#include <neo_localization/Util.h>
+#include <neo_localization/GridMap.h>
 
 #include <vector>
 
 
-template<typename T>
-Matrix<T, 3, 3> rotate2_z(T rad) {
-	return {std::cos(rad), -std::sin(rad), 0,
-			std::sin(rad), std::cos(rad), 0,
-			0, 0, 1};
-}
-
-template<typename T>
-Matrix<T, 3, 3> translate2(T x, T y) {
-	return {1, 0, x,
-			0, 1, y,
-			0, 0, 1};
-}
-
 struct scan_point_t
 {
-	float x = 0;		// [m]
-	float y = 0;		// [m]
-	float w = 1;		// weight [1]
+	double x = 0;		// [m]
+	double y = 0;		// [m]
+	double w = 1;		// weight [1]
 };
 
 
@@ -49,8 +35,7 @@ public:
 
 	template<typename T>
 	void solve(	const GridMap<T>& map,
-				const std::vector<scan_point_t>& points,
-				const float target)
+				const std::vector<scan_point_t>& points)
 	{
 		Matrix<double, 3, 1> G;			// gradient vector
 		Matrix<double, 3, 3> H;			// Hessian matrix
@@ -69,7 +54,7 @@ public:
 			const float grid_y = q[1] * inv_scale - 0.5f;
 
 			// compute error based on grid
-			const double r_i = map.bilinear_lookup(grid_x, grid_y) - target;
+			const double r_i = map.bilinear_lookup(grid_x, grid_y);
 			r_norm += r_i * r_i;
 
 			// compute error gradient based on grid
@@ -113,10 +98,10 @@ public:
 		// solve Gauss-Newton step
 		const auto X = H.inverse() * G;
 
-		// apply new solution with a gain
-		pose_x -= gain * X[0];
-		pose_y -= gain * X[1];
-		pose_yaw -= gain * X[2];
+		// apply new solution with a gain (optimize max. r_norm)
+		pose_x += gain * X[0];
+		pose_y += gain * X[1];
+		pose_yaw += gain * X[2];
 	}
 
 };
