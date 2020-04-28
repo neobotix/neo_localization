@@ -9,8 +9,11 @@
 #define INCLUDE_NEO_LOCALIZATION_UTIL_H_
 
 #include <neo_common/Matrix.h>
+#include <neo_localization/GridMap.h>
 
+#include <ros/ros.h>
 #include <tf/transform_datatypes.h>
+#include <nav_msgs/OccupancyGrid.h>
 
 
 template<typename T>
@@ -194,6 +197,26 @@ Matrix<T, 2, 1> compute_eigenvectors_2(	const Matrix<T, 2, 2>& mat,
 	eigen_vectors[0] /= eigen_vectors[0].norm();
 	eigen_vectors[1] /= eigen_vectors[1].norm();
 	return eigen_values;
+}
+
+inline
+nav_msgs::OccupancyGrid::Ptr convert_to_ros(std::shared_ptr<GridMap<float>> map, Matrix<double, 3, 1> origin, ros::Time stamp = ros::Time())
+{
+	auto grid = boost::make_shared<nav_msgs::OccupancyGrid>();
+	grid->header.stamp = stamp;
+	grid->info.resolution = map->scale();
+	grid->info.width = map->size_x();
+	grid->info.height = map->size_y();
+	grid->info.origin.position.x = origin[0];
+	grid->info.origin.position.y = origin[1];
+	tf::quaternionTFToMsg(tf::createQuaternionFromYaw(origin[2]), grid->info.origin.orientation);
+	grid->data.resize(map->num_cells());
+	for(int y = 0; y < map->size_y(); ++y) {
+		for(int x = 0; x < map->size_x(); ++x) {
+			grid->data[y * map->size_x() + x] = (*map)(x, y) * 100.f;
+		}
+	}
+	return grid;
 }
 
 
