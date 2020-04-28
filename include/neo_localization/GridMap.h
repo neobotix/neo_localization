@@ -148,7 +148,7 @@ public:
 	 * Bilinear summation at a given pixel position.
 	 * A coordinate of (0, 0) will sum at the first pixel exclusively.
 	 */
-	void bilinear_summation(float x, float y, const T& value) const
+	void bilinear_summation(float x, float y, const T& value)
 	{
 		const float a = x - floorf(x);
 		const float b = y - floorf(y);
@@ -159,7 +159,7 @@ public:
 	/*
 	 * Same as bilinear_summation() but with pre-computed offsets a and b.
 	 */
-	void bilinear_summation_ex(int x, int y, float a, float b, const T& value) const
+	void bilinear_summation_ex(int x, int y, float a, float b, const T& value)
 	{
 		const int x0 = std::min(std::max(x, 0), m_size_x - 1);
 		const int x1 = std::min(x0 + 1, m_size_x - 1);
@@ -209,8 +209,13 @@ public:
 	 * Computes gauss-filtered and bilinear-interpolated second-order x and y gradient
 	 * at given pixel position.
 	 */
-	void calc_gradient2(float x, float y, float& ddx, float& ddy) const
+	void calc_gradient2(float x, float y, float& ddx, float& ddy, float& dxdy) const
 	{
+		static const float coeff_33_dxy[3][3] = {
+				{-0.139505, 0, 0.139505},
+				{-0.220989, 0, 0.220989},
+				{-0.139505, 0, 0.139505}
+		};
 		static const float coeff_33_ddxy[3][3] = {
 				{0.069752, -0.139504, 0.069752},
 				{0.110494, -0.220989, 0.110494},
@@ -231,11 +236,13 @@ public:
 				const float value = bilinear_lookup_ex(x0 + i, y0 + j, a, b);
 				ddx += coeff_33_ddxy[j+1][i+1] * value;
 				ddy += coeff_33_ddxy[i+1][j+1] * value;
+				dxdy += coeff_33_dxy[j+1][i+1] * coeff_33_dxy[i+1][j+1] * value * value;
 			}
 		}
 
 		ddx /= 2 * m_scale;
 		ddy /= 2 * m_scale;
+		dxdy /= 2 * m_scale;
 	}
 
 	/*

@@ -88,7 +88,7 @@ public:
 		}
 
 		// we want average r_norm
-		r_norm /= points.size();
+		r_norm = sqrt(r_norm / points.size());
 
 		// add Hessian damping
 		H(0, 0) += damping;

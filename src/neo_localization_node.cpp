@@ -198,7 +198,7 @@ protected:
 			sample_errors[i] = m_solver.r_norm;
 
 			// check if sample is better
-			if(m_solver.r_norm < best_score) {
+			if(m_solver.r_norm > best_score) {
 				best_x = m_solver.pose_x;
 				best_y = m_solver.pose_y;
 				best_yaw = m_solver.pose_yaw;
@@ -460,8 +460,8 @@ protected:
 		}
 
 		const auto tile_origin = (m_grid_to_map * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
-		const auto tile_center = (m_grid_to_map * Matrix<double, 4, 1>{	map->scale() * m_map_size / 2,
-																		map->scale() * m_map_size / 2, 0, 1}).project();
+		const auto tile_center = (m_grid_to_map * Matrix<double, 4, 1>{	map->scale() * map->size_x() / 2,
+																		map->scale() * map->size_y() / 2, 0, 1}).project();
 
 		// publish new map tile for visualization
 		auto ros_grid = boost::make_shared<nav_msgs::OccupancyGrid>();
@@ -593,7 +593,7 @@ int main(int argc, char** argv)
 		ros::spin();
 	}
 	catch(const std::exception& ex) {
-		ROS_ERROR_STREAM("NeoOmniDriveNode: " << ex.what());
+		ROS_ERROR_STREAM("NeoLocalizationNode: " << ex.what());
 		return -1;
 	}
 
