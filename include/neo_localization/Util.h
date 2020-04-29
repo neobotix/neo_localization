@@ -31,6 +31,22 @@ Matrix<T, 3, 3> translate2(T x, T y) {
 }
 
 /*
+ * Creates a 2D (x, y, yaw) transformation matrix.
+ */
+template<typename T>
+Matrix<T, 3, 3> transform2(T x, T y, T rad) {
+	return translate2(x, y) * rotate2_z(rad);
+}
+
+/*
+ * Creates a 2D (x, y, yaw) transformation matrix.
+ */
+template<typename T>
+Matrix<T, 3, 3> transform2(const Matrix<T, 3, 1>& pose) {
+	return translate2(pose[0], pose[1]) * rotate2_z(pose[2]);
+}
+
+/*
  * Creates a 2.5D (x, y, yaw) rotation matrix.
  */
 template<typename T>
@@ -61,6 +77,22 @@ Matrix<T, 4, 4> translate25(T x, T y) {
 			0, 1, 0, y,
 			0, 0, 1, 0,
 			0, 0, 0, 1};
+}
+
+/*
+ * Creates a 2.5D (x, y, yaw) transformation matrix.
+ */
+template<typename T>
+Matrix<T, 4, 4> transform25(T x, T y, T rad) {
+	return translate25(x, y) * rotate25_z(rad);
+}
+
+/*
+ * Creates a 2.5D (x, y, yaw) transformation matrix.
+ */
+template<typename T>
+Matrix<T, 4, 4> transform25(const Matrix<T, 3, 1>& pose) {
+	return translate25(pose[0], pose[1]) * rotate25_z(pose[2]);
 }
 
 /*
