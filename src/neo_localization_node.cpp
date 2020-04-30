@@ -6,6 +6,7 @@
  */
 
 #include <neo_localization/Util.h>
+#include <neo_localization/Convert.h>
 #include <neo_localization/Solver.h>
 #include <neo_localization/GridMap.h>
 
@@ -67,7 +68,7 @@ public:
 		m_node_handle.param("min_sample_std_yaw", m_min_sample_std_yaw, 0.025);
 		m_node_handle.param("max_sample_std_xy", m_max_sample_std_xy, 0.5);
 		m_node_handle.param("max_sample_std_yaw", m_max_sample_std_yaw, 0.5);
-		m_node_handle.param("constrain_threshold", m_constrain_threshold, 0.3);
+		m_node_handle.param("constrain_threshold", m_constrain_threshold, 0.1);
 		m_node_handle.param("disable_threshold", m_disable_threshold, 1.1);
 		m_node_handle.param("transform_timeout", m_transform_timeout, 0.2);
 
@@ -271,24 +272,19 @@ protected:
 		Matrix<double, 3, 1> seed_mean_xyw;
 		const double var_error = compute_variance(sample_errors, mean_score);
 		const Matrix<double, 3, 3> var_xyw = compute_covariance(samples, mean_xyw);
-		const Matrix<double, 3, 3> seed_var_xyw = compute_covariance(seeds, seed_mean_xyw);
+		const Matrix<double, 2, 2> grad_var_xy = compute_virtual_scan_covariance_xy(m_map, points,
+																					Matrix<double, 3, 1>{best_x, best_y, best_yaw});
 
-		// compute "estimated" error characteristic
+		// compute gradient characteristic
 		std::array<Matrix<double, 2, 1>, 2> eigen_vectors;
-		const Matrix<double, 2, 1> eigen_values = compute_eigenvectors_2(var_xyw.get<2, 2>(), eigen_vectors);
-		const Matrix<double, 2, 1> sigma_uv {sqrt(fabs(eigen_values[0])), sqrt(fabs(eigen_values[1]))};
-
-		// compute seed variance along "estimated" eigen vectors
-		const double seed_sigma_u = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xyw.get<2, 1>(), eigen_vectors[0]));
-		const double seed_sigma_v = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xyw.get<2, 1>(), eigen_vectors[1]));
-
-		// TODO: use second order gradients for 1D detection
+		const Matrix<double, 2, 1> eigen_values = compute_eigenvectors_2(grad_var_xy, eigen_vectors);
+		const Matrix<double, 2, 1> grad_uv {sqrt(fabs(eigen_values[1])), sqrt(fabs(eigen_values[0]))};
 
 		// decide if we have 2D, 1D or 0D localization
 		int mode = -1;
-		if(sigma_uv[1] / seed_sigma_v < m_constrain_threshold)
+		if(grad_uv[1] > m_constrain_threshold)
 		{
-			if(sigma_uv[0] / seed_sigma_u < m_constrain_threshold)
+			if(grad_uv[0] > m_constrain_threshold)
 			{
 				mode = 2;	// both sigma ratios are good = 2D mode
 			} else {
@@ -309,9 +305,9 @@ protected:
 			{
 				// constrain update to the good direction (ie. in direction of the eigen vector with the smaller sigma)
 				const auto delta = Matrix<double, 2, 1>{best_x, best_y} - Matrix<double, 2, 1>{grid_pose[0], grid_pose[1]};
-				const auto dist = eigen_vectors[1].dot(delta);
-				new_grid_x = grid_pose[0] + dist * eigen_vectors[1][0];
-				new_grid_y = grid_pose[1] + dist * eigen_vectors[1][1];
+				const auto dist = eigen_vectors[0].dot(delta);
+				new_grid_x = grid_pose[0] + dist * eigen_vectors[0][0];
+				new_grid_y = grid_pose[1] + dist * eigen_vectors[0][1];
 			}
 
 			// use best sample for update
@@ -374,7 +370,7 @@ protected:
 		// keep last odom pose
 		m_last_odom_pose = odom_pose;
 
-		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << float(best_score) << ", sigma_uv=[" << float(sigma_uv[0]) << ", " << float(sigma_uv[1])
+		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << float(best_score) << ", grad_uv=[" << float(grad_uv[0]) << ", " << float(grad_uv[1])
 				<< "] m, std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw) << " rad, mode=" << mode << "D, "
 				<< m_scan_buffer.size() << " scans");
 

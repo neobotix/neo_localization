@@ -163,5 +163,41 @@ protected:
 };
 
 
+/*
+ * Computes a "virtual" covariance matrix based on second order gradients.
+ * A higher covariance means a larger gradient, so the meaning of "covariance" is inverted here.
+ * A higher gradient is better for localization accuracy.
+ */
+inline
+Matrix<double, 2, 2> compute_virtual_scan_covariance_xy(std::shared_ptr<const GridMap<float>> grid,
+														const std::vector<scan_point_t>& points,
+														const Matrix<double, 3, 1>& pose)
+{
+	Matrix<double, 2, 2> var_xy;
+	{
+		// pre-compute transformation matrix
+		const Matrix<double, 3, 3> P = transform2(pose);
+
+		for(const auto& point : points)
+		{
+			// transform sensor point to grid coordinates
+			const auto q = (P * Matrix<double, 3, 1>{point.x, point.y, 1}).project();
+			const float grid_x = grid->world_to_grid(q[0]);
+			const float grid_y = grid->world_to_grid(q[1]);
+
+			float ddx, ddy;
+			grid->calc_gradient2(grid_x, grid_y, ddx, ddy);
+
+			var_xy(0, 0) += ddx * ddx;
+			var_xy(1, 0) += ddx * ddy;
+			var_xy(0, 1) += ddy * ddx;
+			var_xy(1, 1) += ddy * ddy;
+		}
+		var_xy *= 1. / points.size();
+	}
+	return var_xy;
+}
+
+
 
 #endif /* INCLUDE_SOLVER_H_ */
