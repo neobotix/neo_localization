@@ -51,12 +51,14 @@ public:
 		m_node_handle.param("map_size", m_map_size, 1000);
 		m_node_handle.param("map_downscale", m_map_downscale, 0);
 		m_node_handle.param("map_update_rate", m_map_update_rate, 0.5);
+		m_node_handle.param("loc_update_rate", m_loc_update_rate, 10.);
 		m_node_handle.param("num_smooth", m_num_smooth, 5);
 		m_node_handle.param("solver_gain", m_solver.gain, 0.1);
 		m_node_handle.param("solver_damping", m_solver.damping, 1000.);
 		m_node_handle.param("solver_iterations", m_solver_iterations, 20);
 		m_node_handle.param("sample_rate", m_sample_rate, 10);
-		m_node_handle.param("min_points", m_min_points, 10);
+		m_node_handle.param("min_points", m_min_points, 20);
+		m_node_handle.param("max_scans", m_max_scans, 10);
 		m_node_handle.param("update_gain", m_update_gain, 0.5);
 		m_node_handle.param("confidence_gain", m_confidence_gain, 0.01);
 		m_node_handle.param("odometry_std_xy", m_odometry_std_xy, 0.01);
@@ -67,6 +69,7 @@ public:
 		m_node_handle.param("max_sample_std_yaw", m_max_sample_std_yaw, 0.5);
 		m_node_handle.param("constrain_threshold", m_constrain_threshold, 0.3);
 		m_node_handle.param("disable_threshold", m_disable_threshold, 1.1);
+		m_node_handle.param("transform_timeout", m_transform_timeout, 0.2);
 
 		m_sub_scan_topic = m_node_handle.subscribe("/scan", 10, &NeoLocalizationNode::scan_callback, this);
 		m_sub_map_topic = m_node_handle.subscribe("/map", 1, &NeoLocalizationNode::map_callback, this);
@@ -77,13 +80,16 @@ public:
 		m_pub_loc_pose_2 = m_node_handle.advertise<geometry_msgs::PoseWithCovarianceStamped>("/map_pose", 10);
 		m_pub_pose_array = m_node_handle.advertise<geometry_msgs::PoseArray>("/particlecloud", 10);
 
-		m_update_thread = std::thread(&NeoLocalizationNode::update_loop, this);
+		m_loc_update_timer = m_node_handle.createTimer(	ros::Rate(m_loc_update_rate),
+														&NeoLocalizationNode::loc_update, this);
+
+		m_map_update_thread = std::thread(&NeoLocalizationNode::update_loop, this);
 	}
 
 	~NeoLocalizationNode()
 	{
-		if(m_update_thread.joinable()) {
-			m_update_thread.join();
+		if(m_map_update_thread.joinable()) {
+			m_map_update_thread.join();
 		}
 	}
 
@@ -94,29 +100,79 @@ protected:
 	void scan_callback(const sensor_msgs::LaserScan::ConstPtr& scan)
 	{
 		std::lock_guard<std::mutex> lock(m_node_mutex);
+
 		if(!m_map) {
 			return;
 		}
+		if(!m_scan_buffer.empty() && m_scan_buffer.size() >= m_max_scans) {
+			m_scan_buffer.erase(m_scan_buffer.begin());
+		}
+		m_scan_buffer.push_back(scan);
+	}
+
+	/*
+	 * Convert/Transform a scan from ROS format to a specified base frame.
+	 */
+	std::vector<scan_point_t> convert_scan(const sensor_msgs::LaserScan::ConstPtr& scan, const Matrix<double, 4, 4>& odom_to_base)
+	{
+		std::vector<scan_point_t> points;
 
 		tf::StampedTransform sensor_to_base;
 		try {
-			m_tf.waitForTransform(m_base_frame, scan->header.frame_id, scan->header.stamp, ros::Duration(0.2));
-			m_tf.lookupTransform(m_base_frame, scan->header.frame_id, scan->header.stamp, sensor_to_base);
+			m_tf.lookupTransform(m_base_frame, scan->header.frame_id, ros::Time(0), sensor_to_base);
 		} catch(const std::exception& ex) {
 			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(scan->header.frame_id, m_base_frame) failed: " << ex.what());
+			return points;
+		}
+
+		tf::StampedTransform base_to_odom;
+		try {
+			m_tf.waitForTransform(m_odom_frame, m_base_frame, scan->header.stamp, ros::Duration(m_transform_timeout));
+			m_tf.lookupTransform(m_odom_frame, m_base_frame, scan->header.stamp, base_to_odom);
+		} catch(const std::exception& ex) {
+			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(m_base_frame, m_odom_frame) failed: " << ex.what());
+			return points;
+		}
+
+		const Matrix<double, 4, 4> S = convert_transform_3(sensor_to_base);
+		const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
+
+		// precompute transformation matrix from sensor to requested base
+		const Matrix<double, 4, 4> T = odom_to_base * L * S;
+
+		for(size_t i = 0; i < scan->ranges.size(); ++i)
+		{
+			if(scan->ranges[i] <= scan->range_min || scan->ranges[i] >= scan->range_max) {
+				continue;	// no actual measurement
+			}
+
+			// transform sensor points into base coordinate system
+			const Matrix<double, 3, 1> scan_pos = (T * rotate3_z<double>(scan->angle_min + i * scan->angle_increment)
+													* Matrix<double, 4, 1>{scan->ranges[i], 0, 0, 1}).project();
+			scan_point_t point;
+			point.x = scan_pos[0];
+			point.y = scan_pos[1];
+			points.emplace_back(point);
+		}
+		return points;
+	}
+
+	void loc_update(const ros::TimerEvent& event)
+	{
+		std::lock_guard<std::mutex> lock(m_node_mutex);
+
+		if(!m_map || m_scan_buffer.empty()) {
 			return;
 		}
 
 		tf::StampedTransform base_to_odom;
 		try {
-			m_tf.waitForTransform(m_odom_frame, m_base_frame, scan->header.stamp, ros::Duration(0.2));
-			m_tf.lookupTransform(m_odom_frame, m_base_frame, scan->header.stamp, base_to_odom);
+			m_tf.lookupTransform(m_odom_frame, m_base_frame, ros::Time(0), base_to_odom);
 		} catch(const std::exception& ex) {
 			ROS_WARN_STREAM("NeoLocalizationNode: lookupTransform(m_base_frame, m_odom_frame) failed: " << ex.what());
 			return;
 		}
 
-		const Matrix<double, 4, 4> S = convert_transform_3(sensor_to_base);
 		const Matrix<double, 4, 4> L = convert_transform_25(base_to_odom);
 		const Matrix<double, 4, 4> T = translate25(m_offset_x, m_offset_y) * rotate25_z(m_offset_yaw);		// odom to map
 
@@ -126,19 +182,11 @@ protected:
 
 		std::vector<scan_point_t> points;
 
-		for(size_t i = 0; i < scan->ranges.size(); ++i)
+		// convert all scans to current base frame
+		for(auto scan : m_scan_buffer)
 		{
-			if(scan->ranges[i] <= scan->range_min || scan->ranges[i] >= scan->range_max) {
-				continue;	// no actual measurement
-			}
-
-			// transform sensor points into base coordinate system
-			const Matrix<double, 3, 1> scan_pos = (S * rotate3_z<double>(scan->angle_min + i * scan->angle_increment)
-													* Matrix<double, 4, 1>{scan->ranges[i], 0, 0, 1}).project();
-			scan_point_t point;
-			point.x = scan_pos[0];
-			point.y = scan_pos[1];
-			points.emplace_back(point);
+			auto scan_points = convert_scan(scan, L.inverse());
+			points.insert(points.end(), scan_points.begin(), scan_points.end());
 		}
 
 		// check for number of points
@@ -149,7 +197,7 @@ protected:
 		}
 
 		auto pose_array = boost::make_shared<geometry_msgs::PoseArray>();
-		pose_array->header.stamp = scan->header.stamp;
+		pose_array->header.stamp = base_to_odom.stamp_;
 		pose_array->header.frame_id = m_map_frame;
 
 		// calc predicted grid pose based on odometry
@@ -174,8 +222,8 @@ protected:
 		double best_yaw = m_solver.pose_yaw;
 		double best_score = m_solver.r_norm;
 
-		std::vector<Matrix<double, 4, 1>> seeds(m_sample_rate);
-		std::vector<Matrix<double, 4, 1>> samples(m_sample_rate);
+		std::vector<Matrix<double, 3, 1>> seeds(m_sample_rate);
+		std::vector<Matrix<double, 3, 1>> samples(m_sample_rate);
 		std::vector<double> sample_errors(m_sample_rate);
 
 		for(int i = 0; i < m_sample_rate; ++i)
@@ -185,7 +233,7 @@ protected:
 			m_solver.pose_y = dist_y(m_generator);
 			m_solver.pose_yaw = dist_yaw(m_generator);
 
-			seeds[i] = Matrix<double, 4, 1>{m_solver.pose_x, m_solver.pose_y, m_solver.pose_yaw, 1};
+			seeds[i] = Matrix<double, 3, 1>{m_solver.pose_x, m_solver.pose_y, m_solver.pose_yaw};
 
 			// solve sample
 			for(int iter = 0; iter < m_solver_iterations; ++iter) {
@@ -193,7 +241,7 @@ protected:
 			}
 
 			// save sample
-			const auto sample = Matrix<double, 4, 1>{m_solver.pose_x, m_solver.pose_y, m_solver.pose_yaw, 1};
+			const auto sample = Matrix<double, 3, 1>{m_solver.pose_x, m_solver.pose_y, m_solver.pose_yaw};
 			samples[i] = sample;
 			sample_errors[i] = m_solver.r_norm;
 
@@ -207,7 +255,7 @@ protected:
 
 			// add to visualization
 			{
-				const Matrix<double, 3, 1> map_pose = (m_grid_to_map * sample).project();
+				const Matrix<double, 3, 1> map_pose = (m_grid_to_map * sample.extend()).project();
 				tf::Pose pose;
 				pose.setOrigin(tf::Vector3(map_pose[0], map_pose[1], 0));
 				pose.setRotation(tf::createQuaternionFromYaw(map_pose[2]));
@@ -233,6 +281,8 @@ protected:
 		// compute seed variance along "estimated" eigen vectors
 		const double seed_sigma_u = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xyw.get<2, 1>(), eigen_vectors[0]));
 		const double seed_sigma_v = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xyw.get<2, 1>(), eigen_vectors[1]));
+
+		// TODO: use second order gradients for 1D detection
 
 		// decide if we have 2D, 1D or 0D localization
 		int mode = -1;
@@ -272,15 +322,10 @@ protected:
 					(m_grid_to_map * grid_pose_new * L.inverse() * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
 			// apply new offset with an exponential low pass filter
-			const double gain_factor = double(points.size()) / scan->ranges.size();
-			const double gain = fmin(m_update_gain * gain_factor, 1);
-			m_offset_x += (new_offset[0] - m_offset_x) * gain;
-			m_offset_y += (new_offset[1] - m_offset_y) * gain;
-			m_offset_yaw += angles::shortest_angular_distance(m_offset_yaw, new_offset[2]) * gain;
-
-			if(scan->header.stamp > m_offset_time || (m_offset_time - scan->header.stamp).toSec() > 1) {
-				m_offset_time = scan->header.stamp;
-			}
+			m_offset_x += (new_offset[0] - m_offset_x) * m_update_gain;
+			m_offset_y += (new_offset[1] - m_offset_y) * m_update_gain;
+			m_offset_yaw += angles::shortest_angular_distance(m_offset_yaw, new_offset[2]) * m_update_gain;
+			m_offset_time = base_to_odom.stamp_;
 
 			// update particle spread depending on mode
 			if(mode >= 2) {
@@ -330,7 +375,11 @@ protected:
 		m_last_odom_pose = odom_pose;
 
 		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << float(best_score) << ", sigma_uv=[" << float(sigma_uv[0]) << ", " << float(sigma_uv[1])
-				<< "] m, std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw) << " rad, mode=" << mode << "D");
+				<< "] m, std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw) << " rad, mode=" << mode << "D, "
+				<< m_scan_buffer.size() << " scans");
+
+		// clear scan buffer
+		m_scan_buffer.clear();
 	}
 
 	/*
@@ -551,6 +600,8 @@ private:
 	ros::Subscriber m_sub_scan_topic;
 	ros::Subscriber m_sub_pose_estimate;
 
+	ros::Timer m_loc_update_timer;
+
 	tf::TransformListener m_tf;
 	tf::TransformBroadcaster m_tf_broadcaster;
 
@@ -565,6 +616,7 @@ private:
 	int m_solver_iterations = 0;
 	int m_sample_rate = 0;
 	int m_min_points = 0;
+	int m_max_scans = 0;
 	double m_update_gain = 0;
 	double m_confidence_gain = 0;
 	double m_odometry_std_xy = 0;			// odometry xy error in meter per meter driven
@@ -575,7 +627,9 @@ private:
 	double m_max_sample_std_yaw = 0;
 	double m_constrain_threshold = 0;
 	double m_disable_threshold = 0;
+	double m_loc_update_rate = 0;
 	double m_map_update_rate = 0;
+	double m_transform_timeout = 0;
 
 	ros::Time m_offset_time;
 	double m_offset_x = 0;					// current x offset between odom and map
@@ -590,9 +644,11 @@ private:
 	std::shared_ptr<GridMap<float>> m_map;			// map tile
 	nav_msgs::OccupancyGrid::ConstPtr m_world;		// whole map
 
+	std::vector<sensor_msgs::LaserScan::ConstPtr> m_scan_buffer;
+
 	Solver m_solver;
 	std::mt19937 m_generator;
-	std::thread m_update_thread;
+	std::thread m_map_update_thread;
 
 };
 

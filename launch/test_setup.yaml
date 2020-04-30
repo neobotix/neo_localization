@@ -1,10 +1,19 @@
 
-# exponential low pass gain for localization updates (0 to 1)
+# exponential low pass gain for localization update (0 to 1)
 #   (higher gain means odometry is less used / relied on)
 update_gain: 0.5
 
 # time based confidence gain when in 2D / 1D mode
 confidence_gain: 0.01
+
+# how many particles (samples) to spread (per update)
+sample_rate: 10
+
+# localization update rate [1/s]
+loc_update_rate: 10
+
+# map tile update rate [1/s]
+map_update_rate: 0.5
 
 # map tile size in pixels
 map_size: 1000
@@ -14,9 +23,6 @@ map_downscale: 0
 
 # how many 3x3 gaussian smoothing iterations are applied to the map
 num_smooth: 5
-
-# how many particles (samples) to spread for each scan / update
-sample_rate: 10
 
 # odometry error in x and y [m/m] [1]
 #    how fast to increase particle spread when in 1D / 0D mode
@@ -49,14 +55,23 @@ constrain_threshold: 0.3
 #   threshold of 1.0 means we never go into 0D mode
 disable_threshold: 1.1
 
+# minimum number of points per update
+min_points: 20
+
+# maximum number of scans per update
+max_scans: 10
+
 # solver update gain, lower gain = more stability / slower convergence
 solver_gain: 0.1
 
-# solver update damping, higher damping = more numeric stability / slower convergence
+# solver update damping, higher damping = more stability / slower convergence
 solver_damping: 1000
 
 # number of gauss-newton iterations per sample per scan
 solver_iterations: 20
+
+# maximum wait for getting transforms [s]
+transform_timeout: 0.2
 
 # if to broadcast map frame
 broadcast_tf: true
