@@ -13,24 +13,27 @@
 #include <string.h>
 #include <stdexcept>
 #include <memory>
+#include <vector>
 
 
 /*
- * Class for a quadratic grid map.
+ * Class for a rectangular grid map.
  */
 template<typename T>
 class GridMap {
 public:
 	/*
-	 * @param size_ Size of map in pixels per axis
-	 * @param scale_ Size of one pixel in meters
+	 * @param size_x Size of map in pixels
+	 * @param size_y Size of map in pixels
+	 * @param scale Size of one pixel in meters
 	 */
 	GridMap(int size_x, int size_y, float scale)
 		:	m_size_x(size_x),
 			m_size_y(size_y),
-			m_scale(scale)
+			m_scale(scale),
+			m_inv_scale(1 / scale)
 	{
-		m_map = new T[int64_t(size_x) * size_y];
+		m_map = new T[size_t(size_x) * size_y];
 	}
 
 	/*
@@ -57,6 +60,7 @@ public:
 			throw std::logic_error("grid size mismatch");
 		}
 		m_scale = other.m_scale;
+		m_inv_scale = other.m_inv_scale;
 		::memcpy(m_map, other.m_map, num_cells() * sizeof(T));
 		return *this;
 	}
@@ -74,7 +78,7 @@ public:
 	}
 
 	float inv_scale() const {
-		return 1 / m_scale;
+		return m_inv_scale;
 	}
 
 	size_t num_cells() const {
@@ -85,7 +89,7 @@ public:
 	 * Sets all pixels to given value.
 	 */
 	void clear(const T& value) const {
-		for(int64_t i = 0; i < num_cells(); ++i) {
+		for(size_t i = 0; i < num_cells(); ++i) {
 			m_map[i] = value;
 		}
 	}
@@ -114,6 +118,13 @@ public:
 	const T& operator()(int x, int y) const
 	{
 		return m_map[size_t(y) * m_size_x + x];
+	}
+
+	/*
+	 * Converts a coordinate in meters to a grid coordinate in pixels.
+	 */
+	float world_to_grid(float meters) const {
+		return meters * m_inv_scale - 0.5f;
 	}
 
 	/*
@@ -331,11 +342,41 @@ public:
 private:
 	int m_size_x = 0;
 	int m_size_y = 0;
+
 	float m_scale = 0;
+	float m_inv_scale = 0;
 
 	T* m_map = 0;
 
 };
+
+
+template<typename T>
+class MultiGridMap {
+public:
+	std::vector<std::shared_ptr<GridMap<T>>> layers;
+
+	/*
+	 * @param size_x_m Size of map in meters
+	 * @param size_y_m Size of map in meters
+	 * @param scale Size of one pixel in meters
+	 */
+	MultiGridMap(float size_x_m, float size_y_m, float scale, int num_layers)
+	{
+		layers.resize(num_layers);
+		const int base_size_x = size_x_m / (scale * (1 << (num_layers - 1))) + 0.5f;
+		const int base_size_y = size_y_m / (scale * (1 << (num_layers - 1))) + 0.5f;
+
+		for(int i = 0; i < num_layers; ++i) {
+			layers[i] = std::make_shared<GridMap<T>>(base_size_x * (1 << (num_layers - i - 1)),
+													 base_size_y * (1 << (num_layers - i - 1)),
+													 scale * (1 << i));
+		}
+	}
+
+
+};
+
 
 
 #endif /* INCLUDE_GRIDMAP_H_ */

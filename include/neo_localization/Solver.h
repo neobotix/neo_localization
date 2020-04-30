@@ -17,9 +17,14 @@
 
 struct scan_point_t
 {
-	double x = 0;		// [m]
-	double y = 0;		// [m]
-	double w = 1;		// weight [1]
+	float x = 0;		// [m]
+	float y = 0;		// [m]
+};
+
+struct scan_point_ex_t : public scan_point_t
+{
+	float w = 1;		// weight [1]
+	int layer = 0;		// layer index
 };
 
 
@@ -33,63 +38,114 @@ public:
 	double damping = 1;					// numerical hessian damping
 	double r_norm = 0;					// current error norm
 
+	Matrix<double, 3, 1> G;				// gradient vector
+	Matrix<double, 3, 3> H;				// Hessian matrix
+
 	template<typename T>
-	void solve(	const GridMap<T>& map,
+	void solve(	const GridMap<T>& grid,
 				const std::vector<scan_point_t>& points)
 	{
-		Matrix<double, 3, 1> G;			// gradient vector
-		Matrix<double, 3, 3> H;			// Hessian matrix
+		reset();
 
 		// compute transformation matrix first
-		const float inv_scale = map.inv_scale();
-		const Matrix<double, 3, 3> P = translate2(pose_x, pose_y) * rotate2_z(pose_yaw);
-
-		r_norm = 0;
+		const Matrix<double, 3, 3> P = transform2(pose_x, pose_y, pose_yaw);
 
 		for(const auto& point : points)
 		{
 			// transform sensor point to grid coordinates
 			const auto q = (P * Matrix<double, 3, 1>{point.x, point.y, 1}).project();
-			const float grid_x = q[0] * inv_scale - 0.5f;
-			const float grid_y = q[1] * inv_scale - 0.5f;
+			const float grid_x = grid.world_to_grid(q[0]);
+			const float grid_y = grid.world_to_grid(q[1]);
 
 			// compute error based on grid
-			const double r_i = map.bilinear_lookup(grid_x, grid_y);
+			const float r_i = grid.bilinear_lookup(grid_x, grid_y);
 			r_norm += r_i * r_i;
 
 			// compute error gradient based on grid
 			float dx, dy;
-			map.calc_gradient(grid_x, grid_y, dx, dy);
+			grid.calc_gradient(grid_x, grid_y, dx, dy);
 
-			// compute Jacobian row for this point / equation
-			const double J_x = dx * 1.f;
-			const double J_y = dy * 1.f;
-			const double J_yaw =  dx * (-sin(pose_yaw) * point.x - cos(pose_yaw) * point.y)
-								+ dy * ( cos(pose_yaw) * point.x - sin(pose_yaw) * point.y);
-
-			// direct gradient vector summation
-			G[0] += J_x * r_i;
-			G[1] += J_y * r_i;
-			G[2] += J_yaw * r_i;
-
-			// direct Hessian matrix summation
-			H(0, 0) += J_x * J_x;
-			H(1, 1) += J_y * J_y;
-			H(2, 2) += J_yaw * J_yaw;
-
-			H(0, 1) += J_x * J_y;
-			H(1, 0) += J_x * J_y;
-
-			H(0, 2) += J_x * J_yaw;
-			H(2, 0) += J_x * J_yaw;
-
-			H(1, 2) += J_y * J_yaw;
-			H(2, 1) += J_y * J_yaw;
+			integrate(point.x, point.y, r_i, dx, dy);
 		}
 
 		// we want average r_norm
 		r_norm = sqrt(r_norm / points.size());
 
+		update();
+	}
+
+	template<typename T>
+	void solve(	const MultiGridMap<T>& multi_grid,
+				const std::vector<scan_point_ex_t>& points)
+	{
+		reset();
+
+		// compute transformation matrix first
+		const Matrix<double, 3, 3> P = transform2(pose_x, pose_y, pose_yaw);
+
+		for(const auto& point : points)
+		{
+			auto& grid = multi_grid.layers[point.layer];
+
+			// transform sensor point to grid coordinates
+			const auto q = (P * Matrix<double, 3, 1>{point.x, point.y, 1}).project();
+			const float grid_x = grid.world_to_grid(q[0]);
+			const float grid_y = grid.world_to_grid(q[1]);
+
+			// compute error based on grid
+			const float r_i = grid.bilinear_lookup(grid_x, grid_y);
+			r_norm += r_i * r_i;
+
+			// compute error gradient based on grid
+			float dx, dy;
+			grid.calc_gradient(grid_x, grid_y, dx, dy);
+
+			integrate(point.x, point.y, r_i, dx, dy);
+		}
+
+		// we want average r_norm
+		r_norm = sqrt(r_norm / points.size());
+
+		update();
+	}
+
+protected:
+	void reset()
+	{
+		G = Matrix<double, 3, 1>();
+		H = Matrix<double, 3, 3>();
+		r_norm = 0;
+	}
+
+	void integrate(const float p_x, const float p_y, const float r_i, const float dx, const float dy)
+	{
+		const float J_x = dx * 1.f;
+		const float J_y = dy * 1.f;
+		const float J_yaw =   dx * (-sinf(pose_yaw) * p_x - cosf(pose_yaw) * p_y)
+							+ dy * ( cosf(pose_yaw) * p_x - sinf(pose_yaw) * p_y);
+
+		// direct gradient vector summation
+		G[0] += J_x * r_i;
+		G[1] += J_y * r_i;
+		G[2] += J_yaw * r_i;
+
+		// direct Hessian matrix summation
+		H(0, 0) += J_x * J_x;
+		H(1, 1) += J_y * J_y;
+		H(2, 2) += J_yaw * J_yaw;
+
+		H(0, 1) += J_x * J_y;
+		H(1, 0) += J_x * J_y;
+
+		H(0, 2) += J_x * J_yaw;
+		H(2, 0) += J_x * J_yaw;
+
+		H(1, 2) += J_y * J_yaw;
+		H(2, 1) += J_y * J_yaw;
+	}
+
+	void update()
+	{
 		// add Hessian damping
 		H(0, 0) += damping;
 		H(1, 1) += damping;

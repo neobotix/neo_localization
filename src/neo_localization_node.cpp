@@ -59,13 +59,14 @@ public:
 		m_node_handle.param("min_points", m_min_points, 10);
 		m_node_handle.param("update_gain", m_update_gain, 0.5);
 		m_node_handle.param("confidence_gain", m_confidence_gain, 0.01);
-		m_node_handle.param("confidence_loss", m_confidence_loss, 0.1);
-		m_node_handle.param("max_confidence", m_max_confidence, 0.95);
-		m_node_handle.param("sample_std_xy", m_sample_std_xy, 0.5);
-		m_node_handle.param("sample_std_yaw", m_sample_std_yaw, 0.5);
-		m_node_handle.param("constrain_ratio", m_constrain_ratio, 0.2);
+		m_node_handle.param("odometry_std_xy", m_odometry_std_xy, 0.01);
+		m_node_handle.param("odometry_std_yaw", m_odometry_std_yaw, 0.01);
+		m_node_handle.param("min_sample_std_xy", m_min_sample_std_xy, 0.025);
+		m_node_handle.param("min_sample_std_yaw", m_min_sample_std_yaw, 0.025);
+		m_node_handle.param("max_sample_std_xy", m_max_sample_std_xy, 0.5);
+		m_node_handle.param("max_sample_std_yaw", m_max_sample_std_yaw, 0.5);
 		m_node_handle.param("constrain_threshold", m_constrain_threshold, 0.3);
-		m_node_handle.param("disable_threshold", m_disable_threshold, 1.);
+		m_node_handle.param("disable_threshold", m_disable_threshold, 1.1);
 
 		m_sub_scan_topic = m_node_handle.subscribe("/scan", 10, &NeoLocalizationNode::scan_callback, this);
 		m_sub_map_topic = m_node_handle.subscribe("/map", 1, &NeoLocalizationNode::map_callback, this);
@@ -121,6 +122,7 @@ protected:
 
 		const Matrix<double, 3, 1> odom_pose = (L * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 		const double dist_moved = (odom_pose - m_last_odom_pose).get<2>().norm();
+		const double rad_rotated = fabs(angles::normalize_angle(odom_pose[2] - m_last_odom_pose[2]));
 
 		std::vector<scan_point_t> points;
 
@@ -136,7 +138,6 @@ protected:
 			scan_point_t point;
 			point.x = scan_pos[0];
 			point.y = scan_pos[1];
-			point.w = 1;
 			points.emplace_back(point);
 		}
 
@@ -155,10 +156,9 @@ protected:
 		const Matrix<double, 3, 1> grid_pose = (m_grid_to_map.inverse() * T * L * Matrix<double, 4, 1>{0, 0, 0, 1}).project();
 
 		// setup distributions
-		const double rel_std_dev = fmax(1 - m_confidence, 0);
-		std::normal_distribution<double> dist_x(grid_pose[0], m_sample_std_xy * rel_std_dev);
-		std::normal_distribution<double> dist_y(grid_pose[1], m_sample_std_xy * rel_std_dev);
-		std::normal_distribution<double> dist_yaw(grid_pose[2], m_sample_std_yaw * rel_std_dev);
+		std::normal_distribution<double> dist_x(grid_pose[0], m_sample_std_xy);
+		std::normal_distribution<double> dist_y(grid_pose[1], m_sample_std_xy);
+		std::normal_distribution<double> dist_yaw(grid_pose[2], m_sample_std_yaw);
 
 		// solve odometry prediction first
 		m_solver.pose_x = grid_pose[0];
@@ -218,11 +218,10 @@ protected:
 		}
 
 		// compute covariances
-		double mean_error = 0;
-		double mean_yaw = 0;
+		double mean_score = 0;
 		Matrix<double, 3, 1> mean_xyw;
 		Matrix<double, 3, 1> seed_mean_xyw;
-		const double var_error = compute_variance(sample_errors, mean_error);
+		const double var_error = compute_variance(sample_errors, mean_score);
 		const Matrix<double, 3, 3> var_xyw = compute_covariance(samples, mean_xyw);
 		const Matrix<double, 3, 3> seed_var_xyw = compute_covariance(seeds, seed_mean_xyw);
 
@@ -236,17 +235,19 @@ protected:
 		const double seed_sigma_v = sqrt(compute_variance_along_direction_2(seeds, seed_mean_xyw.get<2, 1>(), eigen_vectors[1]));
 
 		// decide if we have 2D, 1D or 0D localization
-		const double factor_0 = fmax(sqrt(var_error) / 0.01, 0.1);
-		const double factor_1 = sigma_uv[0] / seed_sigma_u;
-		const double factor_2 = sigma_uv[1] / seed_sigma_v;
-
 		int mode = -1;
-		if(factor_2 / factor_0 > m_disable_threshold) {
-			mode = 0;		// high sigma_v plus low var_error indicates no error gradient = nothing to localize with
-		} else if(factor_1 > m_constrain_threshold && factor_2 < m_constrain_ratio * m_constrain_threshold) {
-			mode = 1;		// sigma imbalance (above the threshold) means we can/should only localize in one direction
+		if(sigma_uv[1] / seed_sigma_v < m_constrain_threshold)
+		{
+			if(sigma_uv[0] / seed_sigma_u < m_constrain_threshold)
+			{
+				mode = 2;	// both sigma ratios are good = 2D mode
+			} else {
+				mode = 1;	// only one good sigma ratio = 1D mode
+			}
+		} else if(best_score / mean_score > m_disable_threshold) {
+			mode = 2;		// high sample variance but distinct solution means we are converging
 		} else {
-			mode = 2;		// all good
+			mode = 0;		// high sample variance and no distinct solution means we are lost
 		}
 
 		if(mode > 0)
@@ -281,13 +282,21 @@ protected:
 				m_offset_time = scan->header.stamp;
 			}
 
-			if(mode > 1) {
-				// apply time based confidence gain
-				m_confidence += (m_max_confidence - m_confidence) * m_confidence_gain * gain_factor;
+			// update particle spread depending on mode
+			if(mode >= 2) {
+				m_sample_std_xy *= (1 - m_confidence_gain);
+				m_sample_std_yaw *= (1 - m_confidence_gain);
+			} else if(mode == 1) {
+				m_sample_std_xy += dist_moved * m_odometry_std_xy;
+				m_sample_std_yaw *= (1 - m_confidence_gain);
 			} else {
-				// apply confidence loss based on distance moved
-				m_confidence = fmax(m_confidence - dist_moved * m_confidence_loss, 0);
+				m_sample_std_xy += dist_moved * m_odometry_std_xy;
+				m_sample_std_yaw += rad_rotated * m_odometry_std_yaw;
 			}
+
+			// limit particle spread
+			m_sample_std_xy = fmin(fmax(m_sample_std_xy, m_min_sample_std_xy), m_max_sample_std_xy);
+			m_sample_std_yaw = fmin(fmax(m_sample_std_yaw, m_min_sample_std_yaw), m_max_sample_std_yaw);
 		}
 
 		// publish new transform
@@ -320,8 +329,8 @@ protected:
 		// keep last odom pose
 		m_last_odom_pose = odom_pose;
 
-		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << best_score << ", sigma_uv=[" << sigma_uv[0] << ", " << sigma_uv[1]
-				<< "] m, confidence=" << m_confidence << ", mode=" << mode << "D");
+		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << float(best_score) << ", sigma_uv=[" << float(sigma_uv[0]) << ", " << float(sigma_uv[1])
+				<< "] m, std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw) << " rad, mode=" << mode << "D");
 	}
 
 	/*
@@ -362,8 +371,9 @@ protected:
 			m_offset_y = new_offset[1];
 			m_offset_yaw = new_offset[2];
 
-			// reset confidence to zero
-			m_confidence = 0;
+			// reset particle spread to maximum
+			m_sample_std_xy = m_max_sample_std_xy;
+			m_sample_std_yaw = m_max_sample_std_yaw;
 
 			broadcast();
 		}
@@ -388,7 +398,10 @@ protected:
 			m_world_to_map = convert_transform_25(tmp);
 		}
 		m_world = ros_map;
-		m_confidence = 0;
+
+		// reset particle spread to maximum
+		m_sample_std_xy = m_max_sample_std_xy;
+		m_sample_std_yaw = m_max_sample_std_yaw;
 	}
 
 	/*
@@ -554,20 +567,22 @@ private:
 	int m_min_points = 0;
 	double m_update_gain = 0;
 	double m_confidence_gain = 0;
-	double m_confidence_loss = 0;
-	double m_max_confidence = 0;
-	double m_sample_std_xy = 0;
-	double m_sample_std_yaw = 0;
-	double m_constrain_ratio = 0;
+	double m_odometry_std_xy = 0;			// odometry xy error in meter per meter driven
+	double m_odometry_std_yaw = 0;			// odometry yaw error in rad per rad rotated
+	double m_min_sample_std_xy = 0;
+	double m_min_sample_std_yaw = 0;
+	double m_max_sample_std_xy = 0;
+	double m_max_sample_std_yaw = 0;
 	double m_constrain_threshold = 0;
 	double m_disable_threshold = 0;
 	double m_map_update_rate = 0;
 
-	double m_offset_x = 0;			// current x offset between odom and map
-	double m_offset_y = 0;			// current y offset between odom and map
-	double m_offset_yaw = 0;		// current yaw offset between odom and map
-	double m_confidence = 0;		// current localization confidence
 	ros::Time m_offset_time;
+	double m_offset_x = 0;					// current x offset between odom and map
+	double m_offset_y = 0;					// current y offset between odom and map
+	double m_offset_yaw = 0;				// current yaw offset between odom and map
+	double m_sample_std_xy = 0;				// current sample spread in xy
+	double m_sample_std_yaw = 0;			// current sample spread in yaw
 
 	Matrix<double, 3, 1> m_last_odom_pose;
 	Matrix<double, 4, 4> m_grid_to_map;
