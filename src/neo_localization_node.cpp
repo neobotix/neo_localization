@@ -393,7 +393,7 @@ protected:
 			tf::poseMsgToTF(pose->pose.pose, map_pose);
 
 			ROS_INFO_STREAM("NeoLocalizationNode: Got new map pose estimate: x=" << map_pose.getOrigin()[0]
-							<< ", y=" <<  map_pose.getOrigin()[1] << ", yaw=" << tf::getYaw(map_pose.getRotation()));
+							<< " m, y=" <<  map_pose.getOrigin()[1] << " m, yaw=" << tf::getYaw(map_pose.getRotation()) << " rad");
 
 			tf::StampedTransform base_to_odom;
 			try {
