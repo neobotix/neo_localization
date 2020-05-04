@@ -432,7 +432,7 @@ protected:
 	{
 		std::lock_guard<std::mutex> lock(m_node_mutex);
 
-		ROS_INFO_STREAM("NeoLocalizationNode: Got new map with dimensions " << ros_map->info.width << " x " << ros_map->info.height
+		ROS_DEBUG_STREAM("NeoLocalizationNode: Got new map with dimensions " << ros_map->info.width << " x " << ros_map->info.height
 				<< " and cell size " << ros_map->info.resolution);
 
 		{
