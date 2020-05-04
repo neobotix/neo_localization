@@ -366,9 +366,11 @@ protected:
 		// keep last odom pose
 		m_last_odom_pose = odom_pose;
 
-		ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << float(best_score) << ", grad_uv=[" << float(grad_uv[0]) << ", " << float(grad_uv[1])
-				<< "] m, std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw) << " rad, mode=" << mode << "D, "
-				<< m_scan_buffer.size() << " scans");
+		if(update_counter++ % 10 == 0) {
+			ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << float(best_score) << ", grad_uv=[" << float(grad_uv[0]) << ", " << float(grad_uv[1])
+					<< "] m, std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw) << " rad, mode=" << mode << "D, "
+					<< m_scan_buffer.size() << " scans");
+		}
 
 		// clear scan buffer
 		m_scan_buffer.clear();
@@ -635,6 +637,7 @@ private:
 	std::shared_ptr<GridMap<float>> m_map;			// map tile
 	nav_msgs::OccupancyGrid::ConstPtr m_world;		// whole map
 
+	int64_t update_counter = 0;
 	std::map<std::string, sensor_msgs::LaserScan::ConstPtr> m_scan_buffer;
 
 	Solver m_solver;
