@@ -432,7 +432,7 @@ protected:
 	{
 		std::lock_guard<std::mutex> lock(m_node_mutex);
 
-		ROS_DEBUG_STREAM("NeoLocalizationNode: Got new map with dimensions " << ros_map->info.width << " x " << ros_map->info.height
+		ROS_INFO_STREAM("NeoLocalizationNode: Got new map with dimensions " << ros_map->info.width << " x " << ros_map->info.height
 				<< " and cell size " << ros_map->info.resolution);
 
 		{
@@ -535,7 +535,7 @@ protected:
 		}
 		m_pub_map_tile.publish(ros_grid);
 
-		ROS_INFO_STREAM("NeoLocalizationNode: Got new grid at offset (" << tile_x << ", " << tile_y << ") [iworld], "
+		ROS_DEBUG_STREAM("NeoLocalizationNode: Got new grid at offset (" << tile_x << ", " << tile_y << ") [iworld], "
 				"center = (" << tile_center[0] << ", " << tile_center[1] << ") [map]");
 	}
 
