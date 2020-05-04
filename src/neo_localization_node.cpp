@@ -59,7 +59,6 @@ public:
 		m_node_handle.param("solver_iterations", m_solver_iterations, 20);
 		m_node_handle.param("sample_rate", m_sample_rate, 10);
 		m_node_handle.param("min_points", m_min_points, 20);
-		m_node_handle.param("max_scans", m_max_scans, 10);
 		m_node_handle.param("update_gain", m_update_gain, 0.5);
 		m_node_handle.param("confidence_gain", m_confidence_gain, 0.01);
 		m_node_handle.param("odometry_std_xy", m_odometry_std_xy, 0.01);
@@ -105,10 +104,7 @@ protected:
 		if(!m_map) {
 			return;
 		}
-		if(!m_scan_buffer.empty() && m_scan_buffer.size() >= m_max_scans) {
-			m_scan_buffer.erase(m_scan_buffer.begin());
-		}
-		m_scan_buffer.push_back(scan);
+		m_scan_buffer[scan->header.frame_id] = scan;
 	}
 
 	/*
@@ -184,9 +180,9 @@ protected:
 		std::vector<scan_point_t> points;
 
 		// convert all scans to current base frame
-		for(auto scan : m_scan_buffer)
+		for(const auto& scan : m_scan_buffer)
 		{
-			auto scan_points = convert_scan(scan, L.inverse());
+			auto scan_points = convert_scan(scan.second, L.inverse());
 			points.insert(points.end(), scan_points.begin(), scan_points.end());
 		}
 
@@ -612,7 +608,6 @@ private:
 	int m_solver_iterations = 0;
 	int m_sample_rate = 0;
 	int m_min_points = 0;
-	int m_max_scans = 0;
 	double m_update_gain = 0;
 	double m_confidence_gain = 0;
 	double m_odometry_std_xy = 0;			// odometry xy error in meter per meter driven
@@ -640,7 +635,7 @@ private:
 	std::shared_ptr<GridMap<float>> m_map;			// map tile
 	nav_msgs::OccupancyGrid::ConstPtr m_world;		// whole map
 
-	std::vector<sensor_msgs::LaserScan::ConstPtr> m_scan_buffer;
+	std::map<std::string, sensor_msgs::LaserScan::ConstPtr> m_scan_buffer;
 
 	Solver m_solver;
 	std::mt19937 m_generator;

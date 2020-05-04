@@ -58,9 +58,6 @@ disable_threshold: 1.1
 # minimum number of points per update
 min_points: 20
 
-# maximum number of scans per update
-max_scans: 10
-
 # solver update gain, lower gain = more stability / slower convergence
 solver_gain: 0.1
 
