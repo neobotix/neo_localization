@@ -268,19 +268,19 @@ protected:
 		Matrix<double, 3, 1> seed_mean_xyw;
 		const double var_error = compute_variance(sample_errors, mean_score);
 		const Matrix<double, 3, 3> var_xyw = compute_covariance(samples, mean_xyw);
-		const Matrix<double, 2, 2> grad_var_xy = compute_virtual_scan_covariance_xy(m_map, points,
-																					Matrix<double, 3, 1>{best_x, best_y, best_yaw});
+		const Matrix<double, 3, 3> grad_var_xyw =
+				compute_virtual_scan_covariance_xyw(m_map, points, Matrix<double, 3, 1>{best_x, best_y, best_yaw});
 
 		// compute gradient characteristic
 		std::array<Matrix<double, 2, 1>, 2> eigen_vectors;
-		const Matrix<double, 2, 1> eigen_values = compute_eigenvectors_2(grad_var_xy, eigen_vectors);
-		const Matrix<double, 2, 1> grad_uv {sqrt(fabs(eigen_values[1])), sqrt(fabs(eigen_values[0]))};
+		const Matrix<double, 2, 1> eigen_values = compute_eigenvectors_2(grad_var_xyw.get<2, 2>(), eigen_vectors);
+		const Matrix<double, 3, 1> grad_uvw{sqrt(eigen_values[1]), sqrt(eigen_values[0]), sqrt(grad_var_xyw(2, 2))};
 
 		// decide if we have 2D, 1D or 0D localization
 		int mode = -1;
-		if(grad_uv[1] > m_constrain_threshold)
+		if(grad_uvw[1] > m_constrain_threshold)
 		{
-			if(grad_uv[0] > m_constrain_threshold)
+			if(grad_uvw[0] > m_constrain_threshold)
 			{
 				mode = 2;	// both sigma ratios are good = 2D mode
 			} else {
@@ -367,9 +367,9 @@ protected:
 		m_last_odom_pose = odom_pose;
 
 		if(update_counter++ % 10 == 0) {
-			ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << float(best_score) << ", grad_uv=[" << float(grad_uv[0]) << ", " << float(grad_uv[1])
-					<< "] m, std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw) << " rad, mode=" << mode << "D, "
-					<< m_scan_buffer.size() << " scans");
+			ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << float(best_score) << ", grad_uvw=[" << float(grad_uvw[0]) << ", " << float(grad_uvw[1])
+					<< ", " << float(grad_uvw[2]) << "], std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw)
+					<< " rad, mode=" << mode << "D, " << m_scan_buffer.size() << " scans");
 		}
 
 		// clear scan buffer
