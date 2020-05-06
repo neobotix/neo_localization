@@ -57,7 +57,9 @@ Matrix<double, 4, 4> convert_transform_3(const tf::Transform& trans)
  * Converts a grid map to a ROS occupancy map.
  */
 inline
-nav_msgs::OccupancyGrid::Ptr convert_to_ros(std::shared_ptr<GridMap<float>> map, Matrix<double, 3, 1> origin, ros::Time stamp = ros::Time())
+nav_msgs::OccupancyGrid::Ptr convert_to_ros(	std::shared_ptr<GridMap<float>> map,
+												Matrix<double, 3, 1> origin,
+												ros::Time stamp = ros::Time())
 {
 	auto grid = boost::make_shared<nav_msgs::OccupancyGrid>();
 	grid->header.stamp = stamp;
@@ -71,6 +73,38 @@ nav_msgs::OccupancyGrid::Ptr convert_to_ros(std::shared_ptr<GridMap<float>> map,
 	for(int y = 0; y < map->size_y(); ++y) {
 		for(int x = 0; x < map->size_x(); ++x) {
 			grid->data[y * map->size_x() + x] = (*map)(x, y) * 100.f;
+		}
+	}
+	return grid;
+}
+
+/*
+ * Converts a grid map to a binary (-1, 0 or 100) ROS occupancy map.
+ */
+inline
+nav_msgs::OccupancyGrid::Ptr convert_to_ros_binary(	std::shared_ptr<GridMap<float>> map,
+													Matrix<double, 3, 1> origin,
+													float threshold,
+													ros::Time stamp = ros::Time())
+{
+	auto grid = boost::make_shared<nav_msgs::OccupancyGrid>();
+	grid->header.stamp = stamp;
+	grid->info.resolution = map->scale();
+	grid->info.width = map->size_x();
+	grid->info.height = map->size_y();
+	grid->info.origin.position.x = origin[0];
+	grid->info.origin.position.y = origin[1];
+	tf::quaternionTFToMsg(tf::createQuaternionFromYaw(origin[2]), grid->info.origin.orientation);
+	grid->data.resize(map->num_cells());
+	for(int y = 0; y < map->size_y(); ++y) {
+		for(int x = 0; x < map->size_x(); ++x) {
+			if((*map)(x, y) > threshold) {
+				grid->data[y * map->size_x() + x] = 100;
+			} else if((*map)(x, y) < 0) {
+				grid->data[y * map->size_x() + x] = -1;
+			} else {
+				grid->data[y * map->size_x() + x] = 0;
+			}
 		}
 	}
 	return grid;
