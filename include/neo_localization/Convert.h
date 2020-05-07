@@ -87,6 +87,14 @@ nav_msgs::OccupancyGrid::Ptr convert_to_ros_binary(	std::shared_ptr<GridMap<floa
 													float threshold,
 													ros::Time stamp = ros::Time())
 {
+	static const float coeff_55[5][5] = {
+			{0.00118231, 0.01357, 0.0276652, 0.01357, 0.00118231},
+			{0.01357, 0.06814, -0, 0.06814, 0.01357},
+			{0.0276652, -0, -0.50349, -0, 0.0276652},
+			{0.01357, 0.06814, -0, 0.06814, 0.01357},
+			{0.00118231, 0.01357, 0.0276652, 0.01357, 0.00118231},
+	};
+
 	auto grid = boost::make_shared<nav_msgs::OccupancyGrid>();
 	grid->header.stamp = stamp;
 	grid->info.resolution = map->scale();
@@ -98,7 +106,16 @@ nav_msgs::OccupancyGrid::Ptr convert_to_ros_binary(	std::shared_ptr<GridMap<floa
 	grid->data.resize(map->num_cells());
 	for(int y = 0; y < map->size_y(); ++y) {
 		for(int x = 0; x < map->size_x(); ++x) {
-			if((*map)(x, y) > threshold) {
+			// compute LoG filter
+			float sum = 0;
+			for(int j = -2; j <= 2; ++j) {
+				const int y_ = std::min(std::max(y + j, 0), map->size_y() - 1);
+				for(int i = -2; i <= 2; ++i) {
+					const int x_ = std::min(std::max(x + i, 0), map->size_x() - 1);
+					sum += coeff_55[j+2][i+2] * (*map)(x_, y_);
+				}
+			}
+			if(-1 * sum > threshold) {
 				grid->data[y * map->size_x() + x] = 100;
 			} else if((*map)(x, y) < 0) {
 				grid->data[y * map->size_x() + x] = -1;
