@@ -367,7 +367,7 @@ protected:
 		m_last_odom_pose = odom_pose;
 
 		if(update_counter++ % 10 == 0) {
-			ROS_INFO_STREAM("NeoLocalizationNode: r_norm=" << float(best_score) << ", grad_uvw=[" << float(grad_uvw[0]) << ", " << float(grad_uvw[1])
+			ROS_INFO_STREAM("NeoLocalizationNode: score=" << float(best_score) << ", grad_uvw=[" << float(grad_uvw[0]) << ", " << float(grad_uvw[1])
 					<< ", " << float(grad_uvw[2]) << "], std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw)
 					<< " rad, mode=" << mode << "D, " << m_scan_buffer.size() << " scans");
 		}
