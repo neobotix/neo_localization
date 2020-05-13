@@ -273,9 +273,9 @@ protected:
 				compute_virtual_scan_covariance_xyw(m_map, points, Matrix<double, 3, 1>{best_x, best_y, best_yaw});
 
 		// compute gradient characteristic
-		std::array<Matrix<double, 2, 1>, 2> eigen_vectors;
-		const Matrix<double, 2, 1> eigen_values = compute_eigenvectors_2(grad_var_xyw.get<2, 2>(), eigen_vectors);
-		const Matrix<double, 3, 1> grad_uvw{sqrt(eigen_values[1]), sqrt(eigen_values[0]), sqrt(grad_var_xyw(2, 2))};
+		std::array<Matrix<double, 2, 1>, 2> grad_eigen_vectors;
+		const Matrix<double, 2, 1> grad_eigen_values = compute_eigenvectors_2(grad_var_xyw.get<2, 2>(), grad_eigen_vectors);
+		const Matrix<double, 3, 1> grad_std_uvw{sqrt(grad_eigen_values[1]), sqrt(grad_eigen_values[0]), sqrt(grad_var_xyw(2, 2))};
 
 		// decide if we have 3D, 2D, 1D or 0D localization
 		int mode = -1;
@@ -325,14 +325,14 @@ protected:
 			m_offset_time = base_to_odom.stamp_;
 
 			// update particle spread depending on mode
-			if(mode >= 2) {
+			if(mode >= 3) {
 				m_sample_std_xy *= (1 - m_confidence_gain);
-				m_sample_std_yaw *= (1 - m_confidence_gain);
-			} else if(mode == 1) {
-				m_sample_std_xy += dist_moved * m_odometry_std_xy;
-				m_sample_std_yaw *= (1 - m_confidence_gain);
 			} else {
 				m_sample_std_xy += dist_moved * m_odometry_std_xy;
+			}
+			if(mode >= 2) {
+				m_sample_std_yaw *= (1 - m_confidence_gain);
+			} else {
 				m_sample_std_yaw += rad_rotated * m_odometry_std_yaw;
 			}
 
@@ -372,8 +372,8 @@ protected:
 		m_last_odom_pose = odom_pose;
 
 		if(update_counter++ % 10 == 0) {
-			ROS_INFO_STREAM("NeoLocalizationNode: score=" << float(best_score) << ", grad_uvw=[" << float(grad_uvw[0]) << ", " << float(grad_uvw[1])
-					<< ", " << float(grad_uvw[2]) << "], std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw)
+			ROS_INFO_STREAM("NeoLocalizationNode: score=" << float(best_score) << ", grad_uvw=[" << float(grad_std_uvw[0]) << ", " << float(grad_std_uvw[1])
+					<< ", " << float(grad_std_uvw[2]) << "], std_xy=" << float(m_sample_std_xy) << " m, std_yaw=" << float(m_sample_std_yaw)
 					<< " rad, mode=" << mode << "D, " << m_scan_buffer.size() << " scans");
 		}
 
