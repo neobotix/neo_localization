@@ -54,6 +54,7 @@ public:
 		m_node_handle.param("map_update_rate", m_map_update_rate, 0.5);
 		m_node_handle.param("loc_update_rate", m_loc_update_rate, 10.);
 		m_node_handle.param("num_smooth", m_num_smooth, 5);
+		m_node_handle.param("min_score", m_min_score, 0.2);
 		m_node_handle.param("solver_gain", m_solver.gain, 0.1);
 		m_node_handle.param("solver_damping", m_solver.damping, 1000.);
 		m_node_handle.param("solver_iterations", m_solver_iterations, 20);
@@ -69,7 +70,6 @@ public:
 		m_node_handle.param("max_sample_std_yaw", m_max_sample_std_yaw, 0.5);
 		m_node_handle.param("constrain_threshold", m_constrain_threshold, 0.1);
 		m_node_handle.param("constrain_threshold_yaw", m_constrain_threshold_yaw, 0.2);
-		m_node_handle.param("disable_threshold", m_disable_threshold, 1.1);
 		m_node_handle.param("transform_timeout", m_transform_timeout, 0.2);
 
 		m_sub_scan_topic = m_node_handle.subscribe("/scan", 10, &NeoLocalizationNode::scan_callback, this);
@@ -278,19 +278,17 @@ protected:
 		const Matrix<double, 3, 1> grad_std_uvw{sqrt(grad_eigen_values[1]), sqrt(grad_eigen_values[0]), sqrt(grad_var_xyw(2, 2))};
 
 		// decide if we have 3D, 2D, 1D or 0D localization
-		int mode = -1;
-		if(grad_std_uvw[1] > m_constrain_threshold) {
-			if(grad_std_uvw[0] > m_constrain_threshold) {
-				mode = 3;	// 2D position + rotation
-			} else if(grad_std_uvw[2] > m_constrain_threshold_yaw) {
-				mode = 2;	// 1D position + rotation
-			} else {
-				mode = 1;	// 1D position only
+		int mode = 0;
+		if(best_score > m_min_score) {
+			if(grad_std_uvw[1] > m_constrain_threshold) {
+				if(grad_std_uvw[0] > m_constrain_threshold) {
+					mode = 3;	// 2D position + rotation
+				} else if(grad_std_uvw[2] > m_constrain_threshold_yaw) {
+					mode = 2;	// 1D position + rotation
+				} else {
+					mode = 1;	// 1D position only
+				}
 			}
-		} else if(best_score / mean_score > m_disable_threshold) {
-			mode = 3;		// high sample variance but distinct solution means we are converging
-		} else {
-			mode = 0;		// high sample variance and no distinct solution means we are lost
 		}
 
 		if(mode > 0)
@@ -322,24 +320,24 @@ protected:
 			m_offset_x += (new_offset[0] - m_offset_x) * m_update_gain;
 			m_offset_y += (new_offset[1] - m_offset_y) * m_update_gain;
 			m_offset_yaw += angles::shortest_angular_distance(m_offset_yaw, new_offset[2]) * m_update_gain;
-			m_offset_time = base_to_odom.stamp_;
-
-			// update particle spread depending on mode
-			if(mode >= 3) {
-				m_sample_std_xy *= (1 - m_confidence_gain);
-			} else {
-				m_sample_std_xy += dist_moved * m_odometry_std_xy;
-			}
-			if(mode >= 2) {
-				m_sample_std_yaw *= (1 - m_confidence_gain);
-			} else {
-				m_sample_std_yaw += rad_rotated * m_odometry_std_yaw;
-			}
-
-			// limit particle spread
-			m_sample_std_xy = fmin(fmax(m_sample_std_xy, m_min_sample_std_xy), m_max_sample_std_xy);
-			m_sample_std_yaw = fmin(fmax(m_sample_std_yaw, m_min_sample_std_yaw), m_max_sample_std_yaw);
 		}
+		m_offset_time = base_to_odom.stamp_;
+
+		// update particle spread depending on mode
+		if(mode >= 3) {
+			m_sample_std_xy *= (1 - m_confidence_gain);
+		} else {
+			m_sample_std_xy += dist_moved * m_odometry_std_xy;
+		}
+		if(mode >= 2) {
+			m_sample_std_yaw *= (1 - m_confidence_gain);
+		} else {
+			m_sample_std_yaw += rad_rotated * m_odometry_std_yaw;
+		}
+
+		// limit particle spread
+		m_sample_std_xy = fmin(fmax(m_sample_std_xy, m_min_sample_std_xy), m_max_sample_std_xy);
+		m_sample_std_yaw = fmin(fmax(m_sample_std_yaw, m_min_sample_std_yaw), m_max_sample_std_yaw);
 
 		// publish new transform
 		broadcast();
@@ -617,6 +615,7 @@ private:
 	int m_min_points = 0;
 	double m_update_gain = 0;
 	double m_confidence_gain = 0;
+	double m_min_score = 0;
 	double m_odometry_std_xy = 0;			// odometry xy error in meter per meter driven
 	double m_odometry_std_yaw = 0;			// odometry yaw error in rad per rad rotated
 	double m_min_sample_std_xy = 0;
@@ -625,7 +624,6 @@ private:
 	double m_max_sample_std_yaw = 0;
 	double m_constrain_threshold = 0;
 	double m_constrain_threshold_yaw = 0;
-	double m_disable_threshold = 0;
 	double m_loc_update_rate = 0;
 	double m_map_update_rate = 0;
 	double m_transform_timeout = 0;
