@@ -68,6 +68,7 @@ public:
 		m_node_handle.param("max_sample_std_xy", m_max_sample_std_xy, 0.5);
 		m_node_handle.param("max_sample_std_yaw", m_max_sample_std_yaw, 0.5);
 		m_node_handle.param("constrain_threshold", m_constrain_threshold, 0.1);
+		m_node_handle.param("constrain_threshold_yaw", m_constrain_threshold_yaw, 0.2);
 		m_node_handle.param("disable_threshold", m_disable_threshold, 1.1);
 		m_node_handle.param("transform_timeout", m_transform_timeout, 0.2);
 
@@ -276,18 +277,18 @@ protected:
 		const Matrix<double, 2, 1> eigen_values = compute_eigenvectors_2(grad_var_xyw.get<2, 2>(), eigen_vectors);
 		const Matrix<double, 3, 1> grad_uvw{sqrt(eigen_values[1]), sqrt(eigen_values[0]), sqrt(grad_var_xyw(2, 2))};
 
-		// decide if we have 2D, 1D or 0D localization
+		// decide if we have 3D, 2D, 1D or 0D localization
 		int mode = -1;
-		if(grad_uvw[1] > m_constrain_threshold)
-		{
-			if(grad_uvw[0] > m_constrain_threshold)
-			{
-				mode = 2;	// both sigma ratios are good = 2D mode
+		if(grad_std_uvw[1] > m_constrain_threshold) {
+			if(grad_std_uvw[0] > m_constrain_threshold) {
+				mode = 3;	// 2D position + rotation
+			} else if(grad_std_uvw[2] > m_constrain_threshold_yaw) {
+				mode = 2;	// 1D position + rotation
 			} else {
-				mode = 1;	// only one good sigma ratio = 1D mode
+				mode = 1;	// 1D position only
 			}
 		} else if(best_score / mean_score > m_disable_threshold) {
-			mode = 2;		// high sample variance but distinct solution means we are converging
+			mode = 3;		// high sample variance but distinct solution means we are converging
 		} else {
 			mode = 0;		// high sample variance and no distinct solution means we are lost
 		}
@@ -296,18 +297,22 @@ protected:
 		{
 			double new_grid_x = best_x;
 			double new_grid_y = best_y;
+			double new_grid_yaw = best_yaw;
 
-			if(mode == 1)
+			if(mode < 3)
 			{
 				// constrain update to the good direction (ie. in direction of the eigen vector with the smaller sigma)
 				const auto delta = Matrix<double, 2, 1>{best_x, best_y} - Matrix<double, 2, 1>{grid_pose[0], grid_pose[1]};
-				const auto dist = eigen_vectors[0].dot(delta);
-				new_grid_x = grid_pose[0] + dist * eigen_vectors[0][0];
-				new_grid_y = grid_pose[1] + dist * eigen_vectors[0][1];
+				const auto dist = grad_eigen_vectors[0].dot(delta);
+				new_grid_x = grid_pose[0] + dist * grad_eigen_vectors[0][0];
+				new_grid_y = grid_pose[1] + dist * grad_eigen_vectors[0][1];
+			}
+			if(mode < 2) {
+				new_grid_yaw = grid_pose[2];	// keep old orientation
 			}
 
 			// use best sample for update
-			Matrix<double, 4, 4> grid_pose_new = translate25(new_grid_x, new_grid_y) * rotate25_z(best_yaw);
+			Matrix<double, 4, 4> grid_pose_new = translate25(new_grid_x, new_grid_y) * rotate25_z(new_grid_yaw);
 
 			// compute new odom to map offset from new grid pose
 			const Matrix<double, 3, 1> new_offset =
@@ -619,6 +624,7 @@ private:
 	double m_max_sample_std_xy = 0;
 	double m_max_sample_std_yaw = 0;
 	double m_constrain_threshold = 0;
+	double m_constrain_threshold_yaw = 0;
 	double m_disable_threshold = 0;
 	double m_loc_update_rate = 0;
 	double m_map_update_rate = 0;

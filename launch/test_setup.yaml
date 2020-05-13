@@ -44,11 +44,15 @@ max_sample_std_xy: 0.5
 # initial/maximum particle spread in yaw angle [rad]
 max_sample_std_yaw: 0.5
 
-# threshold for 1D / 2D decision making (minimum average second order gradient)
+# threshold for 1D / 2D position decision making (minimum average second order gradient)
 #   if worst gradient direction is below this value we go into 1D mode
 #   if both gradient directions are below we may go into 0D mode, depending on disable_threshold
 #   higher values will make it go into 1D / 0D mode earlier
 constrain_threshold: 0.1
+
+# threshold for 1D / 2D decision making (with or without orientation)
+#   higher values will make it go into 1D mode earlier
+constrain_threshold_yaw: 0.2
 
 # threshold for 2D / 0D decision making (minimum ratio of best score vs. mean score)
 #   higher values will make it go into 0D mode earlier
