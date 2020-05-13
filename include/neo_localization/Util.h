@@ -170,7 +170,8 @@ T compute_variance_along_direction_2(	const std::vector<Matrix<T, N, 1>>& points
 }
 
 // See: http://croninprojects.org/Vince/Geodesy/FindingEigenvectors.pdf
-// See: https://math.stackexchange.com/questions/395698/fast-way-to-calculate-eigen-of-2x2-matrix-using-a-formula
+// See: http://people.math.harvard.edu/~knill/teaching/math21b2004/exhibits/2dmatrices/index.html
+// See: http://math.colgate.edu/~wweckesser/math312Spring06/handouts/IMM_2x2linalg.pdf
 template<typename T>
 Matrix<T, 2, 1> compute_eigenvectors_2(	const Matrix<T, 2, 2>& mat,
 										std::array<Matrix<T, 2, 1>, 2>& eigen_vectors)
@@ -179,14 +180,29 @@ Matrix<T, 2, 1> compute_eigenvectors_2(	const Matrix<T, 2, 2>& mat,
 	const T tmp_0 = std::sqrt(std::pow(mat(0, 0) + mat(1, 1), T(2)) - T(4) * (mat(0, 0) * mat(1, 1) - mat(1, 0) * mat(0, 1)));
 	eigen_values[0] = (mat(0, 0) + mat(1, 1) + tmp_0) / T(2);
 	eigen_values[1] = (mat(0, 0) + mat(1, 1) - tmp_0) / T(2);
-	if(eigen_values[1] > eigen_values[0]) {
-		std::swap(eigen_values[0], eigen_values[1]);
-	}
 
-	eigen_vectors[0] = Matrix<T, 2, 1>{mat(0, 1), eigen_values[0] - mat(0, 0)};
-	eigen_vectors[1] = Matrix<T, 2, 1>{eigen_values[1] - mat(1, 1), mat(1, 0)};
-	eigen_vectors[0] /= eigen_vectors[0].norm();
-	eigen_vectors[1] /= eigen_vectors[1].norm();
+	if(std::abs(eigen_values[0] - eigen_values[1]) > 1e-6)
+	{
+		for(int i = 0; i < 2; ++i)
+		{
+			const Matrix<T, 2, 1> vector_a {-1 * mat(0, 1), mat(0, 0) - eigen_values[i]};
+			const Matrix<T, 2, 1> vector_b {mat(1, 1) - eigen_values[i], -1 * mat(1, 0)};
+
+			if(vector_a.norm() > vector_b.norm()) {
+				eigen_vectors[i] = vector_a;
+			} else{
+				eigen_vectors[i] = vector_b;
+			}
+			eigen_vectors[i].normalize();
+		}
+		if(eigen_values[1] > eigen_values[0]) {
+			std::swap(eigen_values[0], eigen_values[1]);
+			std::swap(eigen_vectors[0], eigen_vectors[1]);
+		}
+	} else {
+		eigen_vectors[0] = Matrix<T, 2, 1>{1, 0};
+		eigen_vectors[1] = Matrix<T, 2, 1>{0, 1};
+	}
 	return eigen_values;
 }
 
