@@ -172,6 +172,7 @@ T compute_variance_along_direction_2(	const std::vector<Matrix<T, N, 1>>& points
 // See: http://croninprojects.org/Vince/Geodesy/FindingEigenvectors.pdf
 // See: http://people.math.harvard.edu/~knill/teaching/math21b2004/exhibits/2dmatrices/index.html
 // See: http://math.colgate.edu/~wweckesser/math312Spring06/handouts/IMM_2x2linalg.pdf
+// Returns eigenvalues in descending order (with matching eigenvector order)
 template<typename T>
 Matrix<T, 2, 1> compute_eigenvectors_2(	const Matrix<T, 2, 2>& mat,
 										std::array<Matrix<T, 2, 1>, 2>& eigen_vectors)

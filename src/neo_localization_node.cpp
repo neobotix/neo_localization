@@ -275,13 +275,13 @@ protected:
 		// compute gradient characteristic
 		std::array<Matrix<double, 2, 1>, 2> grad_eigen_vectors;
 		const Matrix<double, 2, 1> grad_eigen_values = compute_eigenvectors_2(grad_var_xyw.get<2, 2>(), grad_eigen_vectors);
-		const Matrix<double, 3, 1> grad_std_uvw{sqrt(grad_eigen_values[1]), sqrt(grad_eigen_values[0]), sqrt(grad_var_xyw(2, 2))};
+		const Matrix<double, 3, 1> grad_std_uvw{sqrt(grad_eigen_values[0]), sqrt(grad_eigen_values[1]), sqrt(grad_var_xyw(2, 2))};
 
 		// decide if we have 3D, 2D, 1D or 0D localization
 		int mode = 0;
 		if(best_score > m_min_score) {
-			if(grad_std_uvw[1] > m_constrain_threshold) {
-				if(grad_std_uvw[0] > m_constrain_threshold) {
+			if(grad_std_uvw[0] > m_constrain_threshold) {
+				if(grad_std_uvw[1] > m_constrain_threshold) {
 					mode = 3;	// 2D position + rotation
 				} else if(grad_std_uvw[2] > m_constrain_threshold_yaw) {
 					mode = 2;	// 1D position + rotation
